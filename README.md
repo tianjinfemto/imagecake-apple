@@ -48,9 +48,26 @@ open ImageCake.xcodeproj
 
 - 首次构建会联网解析 ONNX Runtime 的 SPM 二进制包（`onnxruntime-swift-package-manager`）。
   离线环境可把它换成本地 `binaryTarget`（见 [docs/ai-runtime.md](docs/ai-runtime.md)）。
-- macOS 本地跑未签名版本时，`project.yml` 已把 `CODE_SIGNING_ALLOWED[sdk=macosx*]` 关掉；
-  上架前改成自己的 Team 并打开签名。
-- iPad 运行：选 iPad 模拟器或真机（真机需在 Signing 里选 Team）。
+- macOS 本地跑未签名版本时，`project.yml` 用 ad-hoc 签名（`CODE_SIGN_IDENTITY[sdk=macosx*] = "-"`，不需要 Team）；
+  上架前改成自己的 Team。
+
+### iPad 运行（v1 主目标）
+
+| 项 | 现状 |
+|---|---|
+| 系统要求 | iPadOS 17+（`supportedDestinations: [iOS, macOS]`，`TARGETED_DEVICE_FAMILY = "1,2"`） |
+| 模拟器 | 免签名，选 iPad Pro/Air 模拟器直接 Run |
+| 真机 | 需在 Signing 里选 Team；免费账号 7 天有效 |
+| 导入/导出 | Files 选择器（`fileImporter`/`fileExporter`）；预设默认落在「文件 → 我的 iPad → ImageCake/Presets」 |
+| 相册 | **未实现**「存回相册」：v1 走 Files 导出 |
+| 手势 | 单指拖框选（智能消除）；**v1 无双指缩放/平移**，画布固定等比适配 |
+| 分屏 | 面板宽度跟窗口走（46%，最小 280pt）；窄分屏下画布仍保留 |
+| 长任务 | 4x 超清/面部重绘是分钟级，**必须保持 App 在前台**（iPadOS 会挂起后台任务，未申请后台执行） |
+| 内存档位 | 导出/超清上限按物理内存分档（4/6/8GB → 16/24/32MP 渲染、12/32/60MP 超清），超出点名拒绝 |
+| 权重 | App 内「模型 → 下载」或从 Files 导入；GFPGAN 340MB，建议先只装 core 档 |
+
+> 以上是**配置与设计上的结论**；本机无 Xcode，尚未在 iPad 模拟器/真机上实际跑过。首次运行请先做：
+> 打开一张 JPEG → 拖一根滑杆（验证渲染）→ 点「抠图」（验证 Vision 兜底）→ 框选后「消除」（验证 ORT）。
 
 ### 权重
 

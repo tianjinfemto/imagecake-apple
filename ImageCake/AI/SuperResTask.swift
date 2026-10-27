@@ -16,9 +16,16 @@ import Foundation
 //      自己那一片，内存只有目标图本身（4 字节/像素）。
 
 enum SuperResTask {
-    /// 输出像素上限。48MP 的目标图是 192MB（RGBA8），再加 ORT 的张量，
-    /// 60MP 是 8GB 设备上还安全的档；超了点名，不静默降采样冒充。
-    static let maxOutputPixels = 60_000_000
+    /// 输出像素上限，**按物理内存分档**。
+    /// 4GB 的 iPad（第 9/10 代）在 4x 超清上最容易被系统直接杀掉：
+    /// 目标图 16MP 就是 64MB 的 RGBA8，加 ORT 张量与源图拷贝很快见顶。
+    /// 8GB 的 Pro 才给到 60MP；中点（6GB）给 32MP。
+    static var maxOutputPixels: Int {
+        let ram = ProcessInfo.processInfo.physicalMemory
+        if ram >= 7_000_000_000 { return 60_000_000 }
+        if ram >= 5_000_000_000 { return 32_000_000 }
+        return 12_000_000
+    }
 
     static func run(display: RGBA8Buffer,
                     scale: Int,

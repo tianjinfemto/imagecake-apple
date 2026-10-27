@@ -34,7 +34,7 @@ final class EditorModel: ObservableObject {
             case .opening: return "RAW 与超大图会比 JPEG 慢很多"
             case .matting: return "MODNet 约 0.5 秒；缺权重时回退 Vision"
             case .inpainting: return "LaMa 单窗约 7 秒（CPU），Core ML 会更快"
-            case .exporting: return "全分辨率重算 + 面部重绘/超清可能是分钟级"
+            case .exporting: return "全分辨率重算 + 面部重绘/超清可能是分钟级；请保持 App 在前台（iPadOS 会挂起后台任务）"
             case .model: return "下载后会做字节数与 SHA-256 双重校验"
             }
         }

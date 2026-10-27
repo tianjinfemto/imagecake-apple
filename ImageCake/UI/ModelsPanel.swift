@@ -74,7 +74,7 @@ struct ModelsPanel: View {
                 importing = nil
             }
         }
-        .frame(minWidth: 600, minHeight: 520)
+        .frame(minWidth: 520, minHeight: 460)
     }
 
     @ViewBuilder

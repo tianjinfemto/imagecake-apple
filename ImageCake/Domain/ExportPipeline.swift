@@ -31,10 +31,23 @@ enum ExportError: LocalizedError {
 }
 
 enum ExportPipeline {
-    /// 全分辨率重载的上限。一张 50MP 的 float RGBA 是 800MB，
-    /// 导出链上还有补丁/超清/编码的峰值——超过就压到 32MP 并点名。
-    static let maxRenderPixels = 32_000_000
-    static let maxPNG16Pixels = 24_000_000
+    /// 全分辨率重载的上限，按物理内存分档。一张 50MP 的 float RGBA 是
+    /// 800MB，链上还有补丁/超清/编码的峰值；4GB 的 iPad 在 16MP 就已经
+    /// 靠边，8GB 的 Pro 才给到 32MP。
+    static var maxRenderPixels: Int {
+        let ram = ProcessInfo.processInfo.physicalMemory
+        if ram >= 7_000_000_000 { return 32_000_000 }
+        if ram >= 5_000_000_000 { return 24_000_000 }
+        return 16_000_000
+    }
+
+    /// PNG-16 是“不压缩 + 双份缓冲”的写法，再叠上内存档。
+    static var maxPNG16Pixels: Int {
+        let ram = ProcessInfo.processInfo.physicalMemory
+        if ram >= 7_000_000_000 { return 24_000_000 }
+        if ram >= 5_000_000_000 { return 20_000_000 }
+        return 12_000_000
+    }
 
     static func render(_ document: ImageDocument,
                        store: ModelStore,

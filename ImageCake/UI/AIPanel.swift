@@ -203,7 +203,7 @@ struct AIPanel: View {
                 .labelsHidden()
                 .frame(width: 150)
             }
-            Text("ESRGAN x4v3 分块跑；4x 的 12MP 需要几分钟，输出超 60MP 会点名拒绝。")
+            Text("ESRGAN x4v3 分块跑；4x 的 12MP 需要几分钟。输出上限按设备内存给（4GB 约 12MP、6GB 约 32MP、8GB 60MP），超出会点名拒绝。")
                 .font(.system(size: 10))
                 .foregroundStyle(Tokens.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)

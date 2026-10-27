@@ -133,7 +133,7 @@ struct ExportSheet: View {
                 }
             }
         }
-        .frame(minWidth: 520, minHeight: 520)
+        .frame(minWidth: 500, minHeight: 480)
     }
 
     private var contentType: UTType {

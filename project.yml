@@ -63,6 +63,8 @@ targets:
         INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
         INFOPLIST_KEY_UIFileSharingEnabled: "YES"
         INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace: "YES"
+        # iPhone + iPad。iPad 是 v1 的主目标，但保留 iPhone 只多一行声明。
+        TARGETED_DEVICE_FAMILY: "1,2"
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         ENABLE_PREVIEWS: "YES"
         SWIFT_EMIT_LOC_STRINGS: "YES"
