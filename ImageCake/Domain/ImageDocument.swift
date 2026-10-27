@@ -1,0 +1,187 @@
+import Foundation
+
+// 一张图在会话里的全部状态。
+//
+// 分工：
+//   · tone 链是**纯参数**的（改滑杆就从 linear 重算一遍）；
+//   · 人像 α 与修复补丁是**资产**（跑一次 AI 得到的，跨越参数变化复用）；
+//   · 抠图/修复都存"参考尺寸"：预览是降采样的，导出是全分辨率的，
+//     没有参考尺寸就只能靠当前画布猜，而猜错的表现是"遮罩整体错位"。
+//
+// 渲染顺序（与 imagecake 的链同序，只保留 v1 范围内可验证的阶段）：
+//   线性调色 → 显示域调色 → 修复补丁 → 换底色/背景虚化
+
+struct ImageDocument: Sendable {
+    /// 工作分辨率的线性图（预览档）。导出时由 ExportPipeline 重新载入全量。
+    var linear: LinearImage
+    var originalSize: PixelSize
+    var params: EditParameters
+    var sourceURL: URL?
+    var isRAW: Bool
+    var loadNote: String
+
+    /// 人像 α（maskReference 尺寸）。nil = 还没抠过。
+    var personMask: MaskBuffer?
+    var maskReference: PixelSize
+
+    /// 修复补丁（按 ref 尺寸存）。
+    var patches: [InpaintPatch]
+
+    var canvasSize: PixelSize { linear.size }
+    var hasPersonMask: Bool { personMask != nil }
+
+    init(loaded: LoadedImage, url: URL) {
+        self.linear = loaded.linear
+        self.originalSize = loaded.originalSize
+        self.params = EditParameters()
+        self.sourceURL = url
+        self.isRAW = loaded.isRAW
+        self.loadNote = loaded.note
+        self.personMask = nil
+        self.maskReference = loaded.linear.size
+        self.patches = []
+    }
+
+    init(linear: LinearImage, originalSize: PixelSize, params: EditParameters,
+         sourceURL: URL?, isRAW: Bool, loadNote: String,
+         personMask: MaskBuffer?, maskReference: PixelSize, patches: [InpaintPatch]) {
+        self.linear = linear
+        self.originalSize = originalSize
+        self.params = params
+        self.sourceURL = sourceURL
+        self.isRAW = isRAW
+        self.loadNote = loadNote
+        self.personMask = personMask
+        self.maskReference = maskReference
+        self.patches = patches
+    }
+
+    /// 预览/导出共用的一次渲染。返回显示码图（8bit 编码前）。
+    func render(applyMask: Bool = true) -> DisplayImage {
+        var display = ToneEngine.render(linear, params: params)
+
+        // 修复补丁：只在尺寸对得上时按相对量贴回去。
+        if !patches.isEmpty {
+            var bytes = display.rgba8()
+            for patch in patches {
+                let scaled: InpaintPatch?
+                if patch.reference == canvasSize {
+                    scaled = patch
+                } else {
+                    scaled = patch.scaled(to: canvasSize)
+                }
+                guard let scaled else { continue }
+                bytes = InpaintTask.compose(bottom: bytes, patch: scaled)
+            }
+            if let rebuilt = DisplayImage(displayRGBA8: bytes) {
+                display = rebuilt
+            }
+        }
+
+        if applyMask, params.bgEnabled, let mask = personMask {
+            display = Self.replaceBackground(display: display, mask: mask, params: params)
+        }
+        return display
+    }
+
+    /// 换底色 / 背景虚化。mask 255 = 人像保留。
+    ///
+    /// 没有抠图就整段 no-op：让"选了底色但画面没变"这件事在 UI 里被点名，
+    /// 而不是在这里悄悄拿整张图当人像。
+    static func replaceBackground(display: DisplayImage, mask: MaskBuffer, params: EditParameters) -> DisplayImage {
+        let canvas = display.size
+        let alpha = mask.resized(to: canvas)
+        guard !alpha.isEmpty else { return display }
+
+        let background: [Float]
+        if params.bgBlur > 0 {
+            let radius = max(1, Int(Double(params.bgBlur) / 100 * Double(canvas.longEdge) * 0.03))
+            if radius > 8 {
+                // 大半径先在 1/4 档上模糊再放大：4MP 上半径 60 的三次盒式模糊
+                // 是十亿级运算，滑杆一动就是几秒；降档后代价降到 1/16，
+                // 而背景本来就该是糊的。
+                let small = PixelSize(width: max(1, canvas.width / 4), height: max(1, canvas.height / 4))
+                let reduced = Resampler.resample(display.pixels, channels: 4, from: canvas, to: small, alphaAware: false)
+                let blurredSmall = blurred(reduced, size: small, radius: max(1, radius / 4))
+                background = Resampler.resample(blurredSmall, channels: 4, from: small, to: canvas, alphaAware: false)
+            } else {
+                background = blurred(display.pixels, size: canvas, radius: radius)
+            }
+        } else {
+            let r = Float(params.bgR / 255), g = Float(params.bgG / 255), b = Float(params.bgB / 255)
+            var color = [Float](repeating: 1, count: canvas.pixelCount * 4)
+            var i = 0
+            while i < canvas.pixelCount * 4 {
+                color[i] = r; color[i + 1] = g; color[i + 2] = b
+                i += 4
+            }
+            background = color
+        }
+
+        var out = [Float](repeating: 0, count: canvas.pixelCount * 4)
+        let alphaBytes = [UInt8](alpha.data)
+        display.pixels.withUnsafeBufferPointer { person in
+            background.withUnsafeBufferPointer { bg in
+                out.withUnsafeMutableBufferPointer { dst in
+                    var i = 0
+                    while i < canvas.pixelCount {
+                        let a = Float(alphaBytes[i]) / 255
+                        let o = i * 4
+                        for c in 0 ..< 3 {
+                            dst[o + c] = person[o + c] * a + bg[o + c] * (1 - a)
+                        }
+                        dst[o + 3] = person[o + 3] * a + bg[o + 3] * (1 - a)
+                        i += 1
+                    }
+                }
+            }
+        }
+        return DisplayImage(size: canvas, pixels: out)
+    }
+
+    /// 三次盒式模糊（近似高斯）。只在背景虚化上用，不需要频域精度。
+    static func blurred(_ pixels: [Float], size: PixelSize, radius: Int) -> [Float] {
+        guard radius > 0, size.pixelCount > 0 else { return pixels }
+        var buffer = pixels
+        for _ in 0 ..< 3 {
+            buffer = boxBlurRGBA(buffer, size: size, radius: radius)
+        }
+        return buffer
+    }
+
+    private static func boxBlurRGBA(_ src: [Float], size: PixelSize, radius: Int) -> [Float] {
+        let w = size.width
+        let h = size.height
+        var tmp = [Float](repeating: 0, count: src.count)
+        var out = [Float](repeating: 0, count: src.count)
+        let window = Float(radius * 2 + 1)
+
+        for y in 0 ..< h {
+            for c in 0 ..< 4 {
+                var sum: Float = 0
+                for x in -radius ... radius {
+                    sum += src[(y * w + min(max(x, 0), w - 1)) * 4 + c]
+                }
+                for x in 0 ..< w {
+                    tmp[(y * w + x) * 4 + c] = sum / window
+                    sum -= src[(y * w + min(max(x - radius, 0), w - 1)) * 4 + c]
+                    sum += src[(y * w + min(max(x + radius + 1, 0), w - 1)) * 4 + c]
+                }
+            }
+        }
+        for x in 0 ..< w {
+            for c in 0 ..< 4 {
+                var sum: Float = 0
+                for y in -radius ... radius {
+                    sum += tmp[(min(max(y, 0), h - 1) * w + x) * 4 + c]
+                }
+                for y in 0 ..< h {
+                    out[(y * w + x) * 4 + c] = sum / window
+                    sum -= tmp[(min(max(y - radius, 0), h - 1) * w + x) * 4 + c]
+                    sum += tmp[(min(max(y + radius + 1, 0), h - 1) * w + x) * 4 + c]
+                }
+            }
+        }
+        return out
+    }
+}

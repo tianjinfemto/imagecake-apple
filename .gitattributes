@@ -1,0 +1,10 @@
+# 行尾统一：脚本在 macOS/Linux 上必须是 LF，否则 shebang 会带 \r，
+# 报 "$'\r': command not found"（这类错误在 CI 上看起来像语法错误）。
+* text=auto
+*.swift text eol=lf
+*.sh text eol=lf
+*.py text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+*.json text eol=lf

@@ -1,0 +1,18 @@
+# Xcode / XcodeGen
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+DerivedData/
+build/
+*.xcresult
+
+# 权重：按需下载，不进仓（与 imagecake 同一条立场）
+ImageCake/Resources/Models/*.onnx
+ImageCake/Resources/Models/*.bin
+*.onnx
+!Tests/Fixtures/**/*.onnx
+
+# 本机产物
+out/
+*.log
+.DS_Store

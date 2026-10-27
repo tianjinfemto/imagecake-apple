@@ -1,0 +1,160 @@
+{
+  "schema": 1,
+  "default_tier": "core",
+  "note": "模型清单是唯一真相：App 读它决定去哪找/怎么校验/怎么喂；scripts/fetch_models.py 读同一份去下载。字节数与 sha256 逐条对齐 imagecake 的 scripts/fetch_models.ps1，换一颗权重必须两处同时改。",
+  "models": [
+    {
+      "id": "matting_modnet",
+      "file": "portrait_matting_modnet_photographic.onnx",
+      "bytes": 25888640,
+      "sha256": "07c308cf0fc7e6e8b2065a12ed7fc07e1de8febb7dc7839d7b7f15dd66584df9",
+      "license": "Apache-2.0",
+      "commercialUse": "allowed",
+      "tier": "onDemand",
+      "purpose": "人像分割：连续 α（发丝级软边），换底色/背景虚化的唯一来源",
+      "source": { "repo": "DavG25/modnet-pretrained-models", "path": "models/modnet_photographic_portrait_matting.onnx" },
+      "io": {
+        "inputName": "input",
+        "outputName": "output",
+        "layout": "nchw",
+        "colorOrder": "rgb",
+        "valueRange": "symmetric",
+        "longEdge": 512,
+        "multipleOf": 32
+      }
+    },
+    {
+      "id": "inpaint_lama",
+      "file": "inpainting_lama_2025jan.onnx",
+      "bytes": 92591623,
+      "sha256": "7df918ac3921d3daf0aae1d219776cf0dc4e4935f035af81841b40adcf74fdf2",
+      "license": "Apache-2.0",
+      "commercialUse": "allowed",
+      "tier": "onDemand",
+      "purpose": "智能消除：LaMa 局部修复（判别式补纹理，不是生成式造内容）",
+      "source": { "repo": "opencv/inpainting_lama", "path": "inpainting_lama_2025jan.onnx" },
+      "io": {
+        "inputName": "image",
+        "maskInputName": "mask",
+        "outputName": "output",
+        "layout": "nchw",
+        "colorOrder": "rgb",
+        "valueRange": "unit",
+        "fixedSize": 512,
+        "maskFill": "zero"
+      }
+    },
+    {
+      "id": "superres_esrgan",
+      "file": "superres_esrgan_x4v3.onnx",
+      "bytes": 4871181,
+      "sha256": "09b757accd747d7e423c1d352b3e8f23e77cc5742d04bae958d4eb8082b76fa4",
+      "license": "BSD-3-Clause",
+      "commercialUse": "allowed",
+      "tier": "core",
+      "purpose": "AI 超清 4x（Real-ESRGAN general-x4v3，compact SRVGG）",
+      "source": { "repo": "Heliosoph/realesrgan-onnx", "path": "realesr-general-x4v3.onnx" },
+      "io": {
+        "inputName": "input",
+        "outputName": "output",
+        "layout": "nchw",
+        "colorOrder": "rgb",
+        "valueRange": "unit",
+        "tile": 256,
+        "overlap": 16,
+        "nativeScale": 4
+      }
+    },
+    {
+      "id": "face_restore_gfpgan",
+      "file": "face_restore_gfpgan_v14.onnx",
+      "bytes": 340256686,
+      "sha256": "cd7311b8d9e13cdb1e208b12363182da58c7bf45e26d1aa67bbeac4751aae92e",
+      "license": "Apache-2.0（权重）/ FFHQ 训练集 CC BY-NC-SA 4.0",
+      "commercialUse": "restricted",
+      "tier": "onDemand",
+      "purpose": "AI 面部重绘（GFPGAN v1.4，512×512；商用需自行确认训练集许可）",
+      "source": { "repo": "Meeperomi/GFPGANv1.4-onnx", "path": "GFPGANv1.4.onnx" },
+      "io": {
+        "inputName": "input",
+        "outputName": "output",
+        "layout": "nchw",
+        "colorOrder": "bgr",
+        "valueRange": "unit",
+        "fixedSize": 512
+      }
+    },
+    {
+      "id": "face_landmarks_478",
+      "file": "face_landmarks_478.onnx",
+      "bytes": 4920995,
+      "sha256": "7d6e82dee82a1dca5fbddb282b3cc74571833a530de317fc22ae325c3358beeb",
+      "license": "见上游仓库",
+      "commercialUse": "unknown",
+      "tier": "core",
+      "purpose": "478 点人脸关键点（瘦脸/五官/眼型的几何来源；v1 未接线）",
+      "source": { "repo": "senty-au/face_landmarks_detector-ONNX", "path": "onnx/model.onnx" },
+      "io": { "layout": "nchw", "colorOrder": "rgb", "valueRange": "unit" }
+    },
+    {
+      "id": "face_detect_yunet",
+      "file": "face_detection_yunet_2023mar.onnx",
+      "bytes": 232589,
+      "sha256": "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4",
+      "license": "Apache-2.0",
+      "commercialUse": "allowed",
+      "tier": "core",
+      "purpose": "YuNet 人脸检测（v1 走 Vision 检测；这颗留作无 Vision 环境的备用）",
+      "source": { "repo": "opencv/face_detection_yunet", "path": "face_detection_yunet_2023mar.onnx" },
+      "io": { "layout": "nchw", "colorOrder": "bgr", "valueRange": "unit" }
+    },
+    {
+      "id": "body_pose_rtmpose",
+      "file": "body_pose_rtmpose_m.onnx",
+      "bytes": 54330877,
+      "sha256": "8ed9cd4724582d00e7978c297472365946277185ecc448d4ad47f4f376ae3208",
+      "license": "Apache-2.0",
+      "commercialUse": "allowed",
+      "tier": "onDemand",
+      "purpose": "RTMPose-m 17 点身形（美体液化几何；v1 未接线）",
+      "source": { "repo": "bukuroo/RTMPose-ONNX", "path": "rtmpose-m.onnx" },
+      "io": { "layout": "nchw", "colorOrder": "rgb", "valueRange": "unit" }
+    },
+    {
+      "id": "face_attr_age",
+      "file": "face_age_fairface_int8.onnx",
+      "bytes": 87339068,
+      "sha256": "c6a6c231140e2111267d9ade2017543c86ff4e685795be4006f1e94e0534c8c0",
+      "license": "Apache-2.0（上游）/ FairFace 数据集 CC BY 4.0",
+      "commercialUse": "check",
+      "tier": "onDemand",
+      "purpose": "FairFace 年龄分类（批量分组；v1 未接线）",
+      "source": { "repo": "onnx-community/fairface_age_image_detection-ONNX", "path": "onnx/model_int8.onnx" },
+      "io": { "layout": "nchw", "colorOrder": "rgb", "valueRange": "unit" }
+    },
+    {
+      "id": "face_attr_gender",
+      "file": "face_gender_fairface_int8.onnx",
+      "bytes": 87333629,
+      "sha256": "bffd871d6e8ce462f201f252ab3558ee3ea6d8340e228978ea6ecb7ee7fe9424",
+      "license": "Apache-2.0（上游）/ FairFace 数据集 CC BY 4.0",
+      "commercialUse": "check",
+      "tier": "onDemand",
+      "purpose": "FairFace 性别分类（批量分组；v1 未接线）",
+      "source": { "repo": "onnx-community/fairface_gender_image_detection-ONNX", "path": "onnx/model_int8.onnx" },
+      "io": { "layout": "nchw", "colorOrder": "rgb", "valueRange": "unit" }
+    },
+    {
+      "id": "face_landmarks_106",
+      "file": "face_landmarks_106.onnx",
+      "bytes": 5030919,
+      "sha256": "c78b3f76f8700fa279e97310e21ad4c354377e1bdd384e9f7d035d95755dd8b3",
+      "license": "见上游仓库",
+      "commercialUse": "unknown",
+      "tier": "onDemand",
+      "purpose": "106 点关键点（备用；v1 未接线）",
+      "source": { "repo": "kunkunlin1221/face-landmarks-2d-106_mbv1", "path": "coordinate_reg_mbv1_fp32.onnx" },
+      "io": { "layout": "nchw", "colorOrder": "rgb", "valueRange": "unit" }
+    }
+  ]
+}

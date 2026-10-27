@@ -1,0 +1,113 @@
+# 首次构建与回归：GitHub Actions 的 macOS runner。
+#
+# 为什么需要它：开发机是 Windows，没有 xcodebuild/Swift；这份工作流是
+# "能不能编译"的最短验证路径。两个 job 分工明确——
+#   · macos-test：App 宿主式单测（22 格），验证几何/色彩/容器/预设契约；
+#   · ios-build：只构建 iOS Simulator 目标，抓平台特有的编译错误
+#     （UIKit/AppKit 分支、Info.plist 键、SwiftUI 的 iOS-only API）。
+# iOS 上不跑测试：同一批断言在 macOS 已跑过，再跑一遍只是多花 runner 分钟。
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos-test:
+    name: macOS · build + tests
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 16
+        run: |
+          set -euo pipefail
+          for v in 16.4 16.3 16.2 16.1 16.0; do
+            if [ -d "/Applications/Xcode_$v.app" ]; then
+              sudo xcode-select -s "/Applications/Xcode_$v.app"
+              break
+            fi
+          done
+          xcodebuild -version
+
+      - name: Install XcodeGen
+        run: |
+          set -euo pipefail
+          brew install xcodegen
+          # supportedDestinations（单 target 双端）需要 >= 2.42。
+          xcodegen version
+
+      - name: Validate model manifest
+        # 清单是唯一真相：这一步只读不下载，能在构建前抓住 JSON/字段错误。
+        run: python3 scripts/fetch_models.py --list
+
+      - name: Generate project
+        run: |
+          set -euo pipefail
+          xcodegen generate
+          ls -la ImageCake.xcodeproj
+
+      - name: Test on macOS
+        run: |
+          set -o pipefail
+          mkdir -p build
+          xcodebuild \
+            -project ImageCake.xcodeproj \
+            -scheme ImageCake \
+            -destination 'platform=macOS' \
+            -derivedDataPath build/DerivedData \
+            -resultBundlePath build/Test.xcresult \
+            test
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-test-results
+          path: build/Test.xcresult
+          if-no-files-found: ignore
+
+  ios-build:
+    name: iPadOS · build (simulator)
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 16
+        run: |
+          set -euo pipefail
+          for v in 16.4 16.3 16.2 16.1 16.0; do
+            if [ -d "/Applications/Xcode_$v.app" ]; then
+              sudo xcode-select -s "/Applications/Xcode_$v.app"
+              break
+            fi
+          done
+          xcodebuild -version
+
+      - name: Install XcodeGen
+        run: |
+          set -euo pipefail
+          brew install xcodegen
+          xcodegen version
+
+      - name: Generate project
+        run: xcodegen generate
+
+      - name: Build for iOS Simulator
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project ImageCake.xcodeproj \
+            -scheme ImageCake \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build/DerivedData \
+            build
