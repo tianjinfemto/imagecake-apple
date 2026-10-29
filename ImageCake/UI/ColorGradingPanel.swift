@@ -229,11 +229,13 @@ struct ColorWheelControl: View {
     }
 
     private func dotPosition(center: CGPoint, radius: CGFloat) -> CGPoint {
+        // 全在 Double 里算完再转回 CGPoint：hue/saturation 是 Double，
+        // center.x/radius 是 CGFloat，直接混算会让 cos/sin 的重载无法解析。
         let degrees = hue < 0 ? hue + 360 : hue
         let radians = degrees * .pi / 180
-        let distance = radius * min(max(saturation / 100, 0), 1)
-        return CGPoint(x: center.x + cos(radians) * distance,
-                       y: center.y + sin(radians) * distance)
+        let distance = Double(radius) * min(max(saturation / 100, 0), 1)
+        return CGPoint(x: center.x + CGFloat(cos(radians) * distance),
+                       y: center.y + CGFloat(sin(radians) * distance))
     }
 
     private func apply(_ location: CGPoint, center: CGPoint, radius: CGFloat) {
