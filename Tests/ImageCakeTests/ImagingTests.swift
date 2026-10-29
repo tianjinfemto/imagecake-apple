@@ -123,9 +123,19 @@ final class GeometryTests: XCTestCase {
         let dilatedBox = MaskOps.boundingBox(dilated)
         XCTAssertEqual(dilatedBox, PixelRect(x: 6, y: 16, width: 18, height: 18))
 
-        let feathered = MaskOps.feathered(mask, radius: 3)
+        // 羽化用单独的大块：radius 3 的三次盒式模糊等效 σ ≈ 3.5、扩散半径约 9 像素，
+        // 10×10 的块中心距边界只有 5 像素，被削到 0.7 是数学必然（不是实现错）。
+        // 32×32 的块中心距边界 15 像素，才真的碰不到边界，断言才有意义。
+        var bigBytes = [UInt8](repeating: 0, count: 64 * 64)
+        for y in 16 ..< 48 {
+            for x in 16 ..< 48 {
+                bigBytes[y * 64 + x] = 255
+            }
+        }
+        let bigMask = MaskBuffer(size: PixelSize(width: 64, height: 64), data: Data(bigBytes))
+        let feathered = MaskOps.feathered(bigMask, radius: 3)
         let values = [UInt8](feathered.data)
-        XCTAssertGreaterThan(values[25 * 64 + 15], 200, "中心不该被羽化削掉")
+        XCTAssertGreaterThan(values[32 * 64 + 32], 250, "中心不该被羽化削掉")
         XCTAssertEqual(values[0], 0)
     }
 
