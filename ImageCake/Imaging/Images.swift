@@ -410,7 +410,8 @@ enum Resampler {
 
         let horizontal = resampleAxis(work, channels: channels, srcW: from.width, srcH: from.height,
                                       srcLen: from.width, dstLen: to.width, horizontal: true)
-        let vertical = resampleAxis(horizontal, channels: channels, srcW: to.width, srcH: from.height,
+        // var 而非 let：预乘结果要在下面就地还原成直通 alpha。
+        var vertical = resampleAxis(horizontal, channels: channels, srcW: to.width, srcH: from.height,
                                     srcLen: from.height, dstLen: to.height, horizontal: false)
 
         if needsPremul {
