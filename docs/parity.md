@@ -56,7 +56,7 @@
 
 | imagecake | 本仓 |
 |---|---|
-| 1000+ C++ 断言（Catch2 风格自研） | 22 格 XCTest（几何/色彩/容器/预设契约） |
+| 1000+ C++ 断言（Catch2 风格自研） | 28 格 XCTest（几何/色彩/色轮与 HSL/容器/预设契约） |
 | 无头 CLI 回归 | 无（v1 不做 CLI） |
 | 权重清单 + 双校验 | ✅ 同一份 `models.json`，脚本与 App 共用 |
 | 缺件点名令牌 | ✅ `[no_model:file]` / `[fallback:vision]` / `[closed_eyes]` / `[too_large]` / `[patch_scaled]` |
