@@ -229,30 +229,14 @@ struct ColorWheelControl: View {
     }
 
     private func dotPosition(center: CGPoint, radius: CGFloat) -> CGPoint {
-        // 全在 Double 里算完再转回 CGPoint：hue/saturation 是 Double，
-        // center.x/radius 是 CGFloat，直接混算会让 cos/sin 的重载无法解析。
-        let degrees = hue < 0 ? hue + 360 : hue
-        let radians = degrees * .pi / 180
-        let distance = Double(radius) * min(max(saturation / 100, 0), 1)
-        return CGPoint(x: center.x + CGFloat(cos(radians) * distance),
-                       y: center.y + CGFloat(sin(radians) * distance))
+        WheelGeometry.location(hue: hue, saturation: saturation, center: center, radius: radius)
     }
 
     private func apply(_ location: CGPoint, center: CGPoint, radius: CGFloat) {
-        let dx = Double(location.x - center.x)
-        let dy = Double(location.y - center.y)
-        let distance = (dx * dx + dy * dy).squareRoot()
-        let normalized = min(distance / Double(radius), 1)
-
-        if normalized < 0.04 {
-            saturation = 0
-            return
-        }
-        var degrees = atan2(dy, dx) * 180 / .pi
-        if degrees < 0 { degrees += 360 }
-        if degrees > 180 { degrees -= 360 }
-        hue = degrees
-        saturation = normalized * 100
+        let next = WheelGeometry.adjust(at: location, center: center, radius: radius)
+        // 死区内 hue 为 nil：只把力度归零，保留用户原来的方向。
+        if let nextHue = next.hue { hue = nextHue }
+        saturation = next.saturation
     }
 
     private func ringColor(_ degrees: Double) -> Color {

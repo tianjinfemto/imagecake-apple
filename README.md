@@ -144,8 +144,8 @@ AI 资产：人像 α → 换底色/背景虚化；修复补丁（相对量）�
 
 | 手段 | 覆盖 |
 |---|---|
-| 单元测试（28 格） | 曲线单调/恒等/坏输入回退；中性调色只做 sRGB 编码；+1EV 线性翻倍；色相旋转；**三区色轮只碰自己的亮度区、八分区 HSL 的相邻带权重分摊**；RGBA8 往返；**PNG-16 经 ImageIO 读回**；分块覆盖恰好一次、加边不越界；外接框/膨胀/羽化；补丁合成只动遮罩内；补丁随画布缩放；预设往返/未知键/太新拒收/缺键落出厂；清单解码与下载 URL；MODNet 输入尺寸；GFPGAN 方框几何 |
-| **真实编译**（2026-10-29） | GitHub Actions 的 macOS runner：`xcodebuild test` 在 macOS 上编过并跑完 **28 格断言全绿**；同一套代码的 iOS Simulator 目标也构建成功（Xcode 16.4 + XcodeGen） |
+| 单元测试（35 格） | 曲线单调/恒等/坏输入回退；中性调色只做 sRGB 编码；+1EV 线性翻倍；色相旋转；**三区色轮只碰自己的亮度区、八分区 HSL 的相邻带权重分摊**；**色轮坐标几何（方向/力度/死区/往返）**；RGBA8 往返；**PNG-16 经 ImageIO 读回**；分块覆盖恰好一次、加边不越界；外接框/膨胀/羽化；补丁合成只动遮罩内；补丁随画布缩放；预设往返/未知键/太新拒收/缺键落出厂；清单解码与下载 URL；MODNet 输入尺寸；GFPGAN 方框几何 |
+| **真实编译**（2026-10-29） | GitHub Actions 的 macOS runner：`xcodebuild test` 在 macOS 上编过并跑完 **35 格断言全绿**；同一套代码的 iOS Simulator 目标也构建成功（Xcode 16.4 + XcodeGen） |
 | 尚未做 | **未在 iPad 模拟器 / 真机上实际运行过**（CI 只做构建，不启动 App）。ORT 权重也没有在真机上跑过推导——CI 不下载 660MB 权重 |
 
 > 首次真实编译暴露并修掉了 4 个问题，全是“没编译过就发现不了”的类型：
@@ -160,7 +160,7 @@ AI 资产：人像 α → 换底色/背景虚化；修复补丁（相对量）�
 
 | job | 做什么 | 能抓到什么 |
 |---|---|---|
-| `macos-test` | 选 Xcode 16 → 装 XcodeGen → 校验模型清单 → 生成工程 → `xcodebuild test` | 全部 28 格断言；App 宿主测试的签名/`TEST_HOST` 问题 |
+| `macos-test` | 选 Xcode 16 → 装 XcodeGen → 校验模型清单 → 生成工程 → `xcodebuild test` | 全部 35 格断言；App 宿主测试的签名/`TEST_HOST` 问题 |
 | `ios-build` | 同一套生成流程 → 只构建 iOS Simulator | UIKit/AppKit 分支、iOS-only SwiftUI API、Info.plist 键 |
 
 推上去后在 Actions 页面看 `macos-test` 的第一个红步：
