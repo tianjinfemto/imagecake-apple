@@ -1,11 +1,11 @@
 import SwiftUI
 
-// 调色面板。v1 只放能端到端验证的项：
+// 调色面板。
 //   线性域：曝光 / 色温 / 色调
-//   显示域：对比 / 饱和度 / 色相 / 四条曲线
-// 三区色轮与八分区 HSL 的参数已经在 EditParameters 里（预设可读可写），
-// 面板入口留到下一批——半块面板比没有面板更容易让人以为"功能没做"。
-// 背景与 AI 相关的入口都在 AI 面板，这里只管"颜色"。
+//   显示域：对比 / 饱和度 / 色相 / 四条曲线 / 三区色轮 / 八分区 HSL
+// 色轮与 HSL 的算法一直在 ToneEngine 里跑、参数也早就在预设里，
+// 缺的只是入口——所以 ColorGradingPanel 只负责把已有的算子接到滑杆上。
+// 背景与 AI 相关的入口都在 AI 面板，这里只管“颜色”。
 
 struct TonePanel: View {
     @EnvironmentObject private var model: EditorModel
@@ -33,8 +33,10 @@ struct TonePanel: View {
                 CurveEditorView(curves: curves)
             }
 
+            ColorGradingPanel().environmentObject(model)
+
             SectionCard(title: "关于这版", subtitle: "v1 边界") {
-                Text("三区色轮与八分区 HSL 的参数已进预设、已进算子，但面板入口在下一批；本地滤镜表（.cube）、XMP 与批量不在 v1。")
+                Text("本地滤镜表（.cube）、XMP 与批量不在 v1；旋转/裁剪会改画布尺寸，需与重采集同批。")
                     .font(.system(size: 10))
                     .foregroundStyle(Tokens.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
