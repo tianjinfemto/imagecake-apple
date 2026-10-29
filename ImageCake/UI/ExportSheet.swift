@@ -62,6 +62,7 @@ struct ExportSheet: View {
     @State private var filename = "imagecake.jpg"
     @State private var showExporter = false
     @State private var destination: ExportDestination = .files
+    @State private var nameTemplate = ExportNaming.defaultTemplate
 
     var body: some View {
         NavigationStack {
@@ -101,6 +102,28 @@ struct ExportSheet: View {
                     Text("全分辨率会重新读一遍源文件并按 32MP 上限保护；预览档只有 2048 长边，不适合当交付件。")
                         .font(.system(size: 10))
                         .foregroundStyle(Tokens.textSecondary)
+                }
+
+                Section("文件名") {
+                    TextField("模板", text: $nameTemplate)
+                        .font(.system(size: 11, design: .monospaced))
+
+                    Text("预览：\(previewFilename)")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(Tokens.accent)
+                        .textSelection(.enabled)
+
+                    if !unknownTokens.isEmpty {
+                        Text("不认识的占位符：\(unknownTokens.joined(separator: "、"))，导出时会原样保留。")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Tokens.danger)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Text("{stem} 原文件名、{date} 日期、{time} 时间、{index} 序号、{ext} 扩展名。模板不含 {ext} 时会自动补扩展名。")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Tokens.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 #if os(iOS)
@@ -186,6 +209,14 @@ struct ExportSheet: View {
         }
     }
 
+    private var previewFilename: String {
+        model.suggestedFilename(ext: format.fileExtension, template: nameTemplate)
+    }
+
+    private var unknownTokens: [String] {
+        ExportNaming.unknownTokens(in: nameTemplate)
+    }
+
     private var photoNote: String {
         if format == .png16 {
             return "相册会按 8bit 转存，16bit 交付件请用「文件」或「两者」。"
@@ -198,7 +229,8 @@ struct ExportSheet: View {
             guard let result = await model.exportData(format: format,
                                                       quality: quality,
                                                       maxEdge: maxEdge,
-                                                      fullResolution: fullResolution) else { return }
+                                                      fullResolution: fullResolution,
+                                                      nameTemplate: nameTemplate) else { return }
 
             #if os(iOS)
             if destination.writesPhotoLibrary {

@@ -264,7 +264,8 @@ final class EditorModel: ObservableObject {
     func exportData(format: ExportFormat,
                     quality: Double,
                     maxEdge: Int,
-                    fullResolution: Bool) async -> (data: Data, filename: String)? {
+                    fullResolution: Bool,
+                    nameTemplate: String = ExportNaming.defaultTemplate) async -> (data: Data, filename: String)? {
         guard let doc = document else { return nil }
         busy = .exporting(format.title)
         defer { busy = nil }
@@ -276,7 +277,7 @@ final class EditorModel: ObservableObject {
             let data = try await Task.detached(priority: .userInitiated) {
                 try ExportPipeline.encode(outcome, format: format, quality: quality, maxEdge: maxEdge)
             }.value
-            let name = suggestedFilename(ext: format.fileExtension)
+            let name = suggestedFilename(ext: format.fileExtension, template: nameTemplate)
             status = "导出完成 · \(ByteCountFormatter.string(fromByteCount: Int64(data.count), countStyle: .file))"
             return (data, name)
         } catch {
@@ -307,10 +308,9 @@ final class EditorModel: ObservableObject {
     }
     #endif
 
-    func suggestedFilename(ext: String) -> String {
-        guard let doc = document else { return "imagecake.\(ext)" }
-        let stem = doc.sourceURL?.deletingPathExtension().lastPathComponent ?? "imagecake"
-        return "\(stem)-imagecake.\(ext)"
+    func suggestedFilename(ext: String, template: String = ExportNaming.defaultTemplate) -> String {
+        let stem = document?.sourceURL?.deletingPathExtension().lastPathComponent ?? "imagecake"
+        return ExportNaming.filename(template: template, stem: stem, ext: ext)
     }
 
     // MARK: - 预设
