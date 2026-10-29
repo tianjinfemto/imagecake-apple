@@ -3,11 +3,34 @@ import UniformTypeIdentifiers
 
 // 导出面板。
 //
-// 两件事刻意放在这里而不是自动：
+// 三件事刻意放在这里而不是自动：
 //   · **全分辨率**：默认开（交付件就该是全量），但预览是 2048 档，
 //     用户有权知道"这次要多等一会儿"；
+//   · **保存去向**：iPadOS 上可以直接进相册（macOS 不提供——那边用 Files
+//     更自然）；16bit PNG 存相册会被照片库转成 8bit，面板里点名；
 //   · **导出报告**：AI 步骤失败/降级（`[patch_scaled]` / `[closed_eyes]` /
-//     `[too_large]`）原样贴出来，不折成一句"导出完成"。
+//     `[too_large]` / `[photos_denied]`）原样贴出来，不折成一句"导出完成"。
+
+/// 导出后的去向。macOS 上只会有 `.files`，所以这个枚举不放在 #if 里——
+/// 让两个平台都编译到，少一个只在一边生效的分支。
+enum ExportDestination: String, CaseIterable, Identifiable {
+    case files
+    case photos
+    case both
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .files: return "文件"
+        case .photos: return "相册"
+        case .both: return "两者"
+        }
+    }
+
+    /// 是否要写相册。macOS 不提供入口（那边用 Files），所以那边只会是 .files。
+    var writesPhotoLibrary: Bool { self != .files }
+}
 
 struct ExportFile: FileDocument {
     static var readableContentTypes: [UTType] { [.png, .jpeg, .heic, .json] }
@@ -38,6 +61,7 @@ struct ExportSheet: View {
     @State private var payload: ExportFile?
     @State private var filename = "imagecake.jpg"
     @State private var showExporter = false
+    @State private var destination: ExportDestination = .files
 
     var body: some View {
         NavigationStack {
@@ -78,6 +102,24 @@ struct ExportSheet: View {
                         .font(.system(size: 10))
                         .foregroundStyle(Tokens.textSecondary)
                 }
+
+                #if os(iOS)
+                Section("保存到") {
+                    Picker("保存到", selection: $destination) {
+                        ForEach(ExportDestination.allCases) { item in
+                            Text(item.title).tag(item)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    if destination.writesPhotoLibrary {
+                        Text(photoNote)
+                            .font(.system(size: 10))
+                            .foregroundStyle(format == .png16 ? Tokens.danger : Tokens.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                #endif
 
                 Section("这一步会做什么") {
                     if model.params.faceRestore > 0 {
@@ -144,12 +186,33 @@ struct ExportSheet: View {
         }
     }
 
+    private var photoNote: String {
+        if format == .png16 {
+            return "相册会按 8bit 转存，16bit 交付件请用「文件」或「两者」。"
+        }
+        return "写入后在「照片」里直接可见；「两者」会再弹一次文件保存，适合既归档又分享。"
+    }
+
     private func runExport() {
         Task {
             guard let result = await model.exportData(format: format,
                                                       quality: quality,
                                                       maxEdge: maxEdge,
                                                       fullResolution: fullResolution) else { return }
+
+            #if os(iOS)
+            if destination.writesPhotoLibrary {
+                let saved = await model.saveToPhotos(result.data)
+                if destination == .photos {
+                    // 只存相册：成功就关窗；失败留在面板上，让「导出报告」把原因说清
+                    // （拒绝授权是 `[photos_denied]`，不是一句“导出失败”）。
+                    if saved { dismiss() }
+                    return
+                }
+                _ = saved   // 两者：即使相册失败，文件仍要继续给
+            }
+            #endif
+
             payload = ExportFile(data: result.data)
             filename = result.filename
             showExporter = true

@@ -17,6 +17,7 @@ final class EditorModel: ObservableObject {
         case matting
         case inpainting
         case exporting(String)
+        case savingToPhotos
         case model(String)
 
         var title: String {
@@ -25,6 +26,7 @@ final class EditorModel: ObservableObject {
             case .matting: return "正在抠图"
             case .inpainting: return "正在消除选区"
             case .exporting(let name): return "正在导出 \(name)"
+            case .savingToPhotos: return "正在写入相册"
             case .model(let name): return "正在处理 \(name)"
             }
         }
@@ -35,6 +37,7 @@ final class EditorModel: ObservableObject {
             case .matting: return "MODNet 约 0.5 秒；缺权重时回退 Vision"
             case .inpainting: return "LaMa 单窗约 7 秒（CPU），Core ML 会更快"
             case .exporting: return "全分辨率重算 + 面部重绘/超清可能是分钟级；请保持 App 在前台（iPadOS 会挂起后台任务）"
+            case .savingToPhotos: return "字节直接交给照片库，不重新编码；首次会弹一次授权框"
             case .model: return "下载后会做字节数与 SHA-256 双重校验"
             }
         }
@@ -281,6 +284,28 @@ final class EditorModel: ObservableObject {
             return nil
         }
     }
+
+    #if os(iOS)
+    /// 把已编码好的字节存进系统相册。
+    ///
+    /// 失败原因追加进 `exportNotes` 而不是弹 alert：导出报告本来就是
+    /// 「哪一步没做成」的专用出口，相册失败与 `[patch_scaled]` 同类。
+    /// 返回值只表示是否成功，由导出面板决定是关窗还是停在报告上。
+    func saveToPhotos(_ data: Data) async -> Bool {
+        busy = .savingToPhotos
+        defer { busy = nil }
+        do {
+            try await PhotoLibraryWriter.save(data)
+            status = "已存入相册 · \(ByteCountFormatter.string(fromByteCount: Int64(data.count), countStyle: .file))"
+            return true
+        } catch {
+            let text = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            exportNotes.append(text)
+            status = "存入相册失败"
+            return false
+        }
+    }
+    #endif
 
     func suggestedFilename(ext: String) -> String {
         guard let doc = document else { return "imagecake.\(ext)" }
