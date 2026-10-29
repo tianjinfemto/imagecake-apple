@@ -27,6 +27,32 @@
 
 > 这一节挂了，后面全部无意义——先修这里。
 
+## 1.5 侧载注意（未签名 ipa）
+
+CI 的 `iPadOS · unsigned ipa` job 会产出 `ImageCake-unsigned.ipa`（跳过签名）。
+实测产物结构（run 40848702846）：
+
+```
+ImageCake.app/                       32 MB
+├─ ImageCake                         32 MB（主二进制）
+└─ Frameworks/
+   └─ onnxruntime.framework          ← 动态 framework
+```
+
+**关键：`onnxruntime.framework` 是动态的，不是静态链进主二进制。** 重签工具
+必须把这个嵌套的 framework 一起签。Sideloadly / AltStore 通常会自己处理，
+但如果你遇到下面两种现象，**先怀疑它**：
+
+| 现象 | 含义 |
+|---|---|
+| 安装时报 `code object is not signed at all` | 嵌套 framework 没被重签 |
+| 装上了但点图标就闪退 | 同上，dyld 加载 `onnxruntime.framework` 失败 |
+
+排查：在 iPad 上看崩溃日志，如果堆栈顶部是 `dyld` 或 `onnxruntime` 相关，
+就是签名问题而不是我们的代码。
+
+ipa 本身 8.5MB（zip 压缩后），解压后 32MB——不含任何 AI 权重。
+
 ## 2. 批次 1 新功能（逐项，本次重点）
 
 ### 2.1 画布缩放 / 平移
