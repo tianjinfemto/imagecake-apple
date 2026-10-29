@@ -60,12 +60,16 @@ final class EditorModel: ObservableObject {
     @Published private(set) var lastAIPath = ""
     @Published private(set) var lastAINote = ""
     @Published private(set) var exportNotes: [String] = []
+    /// 调色参数的撤销栈。只覆盖参数：AI 资产（α / 补丁）有自己的回退入口，
+    /// 把它们也存进历史会让内存按图数乘以几十 MB。
+    @Published private(set) var history = ParameterHistory()
     /// 模型文件变化时自增，逼模型面板重新读盘。
     @Published private(set) var modelRevision = 0
 
     let store: ModelStore
     private let ort = ORTEngine.shared
     private var renderTask: Task<Void, Never>?
+    private var historyTask: Task<Void, Never>?
     private var lastOpenURL: URL?
 
     init() {
@@ -95,6 +99,11 @@ final class EditorModel: ObservableObject {
             var doc = ImageDocument(loaded: loaded, url: url)
             doc.params = EditParameters()
             document = doc
+            // 换图：旧图的历史全部作废，防抖任务也要提掉（否则它会把新图
+            // 的参数当作一次修改记进去）。
+            historyTask?.cancel()
+            historyTask = nil
+            history.reset(to: doc.params)
             selection = nil
             selectionMode = false
             showMask = false
@@ -123,12 +132,59 @@ final class EditorModel: ObservableObject {
         doc.params.clamp()
         document = doc
         scheduleRender()
+        scheduleHistoryCommit()
+    }
+
+    // MARK: - 撤销 / 重做
+
+    var canUndo: Bool { history.canUndo }
+    var canRedo: Bool { history.canRedo }
+
+    /// 滑杆拖一下会产生几十次 updateParams。如果每次都入栈，一次拖动就占满
+    /// 整个历史；所以停手 600ms 后才记一步。
+    private func scheduleHistoryCommit() {
+        historyTask?.cancel()
+        historyTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            guard !Task.isCancelled, let self, let doc = self.document else { return }
+            self.history.commit(doc.params)
+        }
+    }
+
+    /// 原子操作（复位、载入预设）立即入栈，并把可能存在的防抖任务撤掉，
+    /// 否则它会在 600ms 后用一个旧值盖掉刚记的那一步。
+    private func commitHistoryNow() {
+        historyTask?.cancel()
+        historyTask = nil
+        guard let doc = document else { return }
+        history.commit(doc.params)
+    }
+
+    func undo() {
+        historyTask?.cancel()
+        historyTask = nil
+        guard var doc = document, let restored = history.undo() else { return }
+        doc.params = restored
+        document = doc
+        scheduleRender()
+        status = "已撤销"
+    }
+
+    func redo() {
+        historyTask?.cancel()
+        historyTask = nil
+        guard var doc = document, let restored = history.redo() else { return }
+        doc.params = restored
+        document = doc
+        scheduleRender()
+        status = "已重做"
     }
 
     func resetParams() {
         guard var doc = document else { return }
         doc.params = EditParameters()
         document = doc
+        commitHistoryNow()
         scheduleRender()
         status = "调色已复位（AI 资产保留）"
     }
@@ -319,6 +375,7 @@ final class EditorModel: ObservableObject {
         guard var doc = document else { return }
         doc.params = params
         document = doc
+        commitHistoryNow()
         scheduleRender()
         var message = "已载入预设 \(sourceName)"
         if let report, !report.warning.isEmpty {

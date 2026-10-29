@@ -177,6 +177,22 @@ struct EditorView: View {
     private var toolbarContent: some ToolbarContent {
         ToolbarItemGroup(placement: .primaryAction) {
             Button {
+                model.undo()
+            } label: {
+                Label("撤销", systemImage: "arrow.uturn.backward")
+            }
+            .keyboardShortcut("z", modifiers: .command)
+            .disabled(!model.canUndo)
+
+            Button {
+                model.redo()
+            } label: {
+                Label("重做", systemImage: "arrow.uturn.forward")
+            }
+            .keyboardShortcut("z", modifiers: [.command, .shift])
+            .disabled(!model.canRedo)
+
+            Button {
                 showOpen = true
             } label: {
                 Label("打开", systemImage: "folder")
