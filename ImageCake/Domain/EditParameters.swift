@@ -51,6 +51,12 @@ public struct EditParameters: Equatable, Sendable {
     public var saturation: Double = 0      // -100 ... +100
     public var hue: Double = 0             // -180 ... +180 度
 
+    // —— 显示域空间滤波 ——
+    // 作用在调色**之后**（见 SpatialFilters）：要读邻域，进不了 ToneEngine 的逐像素循环。
+    // 0 = 关。降噪先于锐化，反过来等于先把噪声锐化一遍。
+    public var denoise: Double = 0         // 0 ... 100，双边滤波强度
+    public var sharpen: Double = 0         // 0 ... 100，unsharp mask 强度
+
     // 三区色轮（阴影/中间调/高光）：推的方向 + 力度 + 亮度
     public var wshHue: Double = 0, wshSat: Double = 0, wshLum: Double = 0
     public var wmtHue: Double = 0, wmtSat: Double = 0, wmtLum: Double = 0
@@ -103,8 +109,14 @@ public struct EditParameters: Equatable, Sendable {
         (hslHue + hslSat + hslLum).allSatisfy { $0 == 0 }
     }
 
+    /// 空间滤波是否全关。它们活在 ToneEngine 之外，所以单独一个谓词，
+    /// 不塞进 isDisplayNeutral——那个谓词是给逐像素循环看的。
+    public var isSpatialNeutral: Bool {
+        denoise == 0 && sharpen == 0
+    }
+
     public var isNeutral: Bool {
-        isLinearNeutral && isDisplayNeutral && faceRestore == 0 && superRes == 0
+        isLinearNeutral && isDisplayNeutral && isSpatialNeutral && faceRestore == 0 && superRes == 0
     }
 
     /// 面板/批量用的夹取：坏值不静默通过，一律收敛到算子能吃的区间。
@@ -121,6 +133,8 @@ public struct EditParameters: Equatable, Sendable {
         hslHue = normalizeArray(hslHue, count: 8) { $0.clamped(to: -30 ... 30) }
         hslSat = normalizeArray(hslSat, count: 8) { $0.clamped(to: -100 ... 100) }
         hslLum = normalizeArray(hslLum, count: 8) { $0.clamped(to: -100 ... 100) }
+        denoise = denoise.clamped(to: 0 ... 100)
+        sharpen = sharpen.clamped(to: 0 ... 100)
         if curves.count != 4 { curves = Array(repeating: .identity, count: 4) }
         for i in curves.indices where !curves[i].isValid { curves[i] = .identity }
         bgR = bgR.clamped(to: 0 ... 255); bgG = bgG.clamped(to: 0 ... 255); bgB = bgB.clamped(to: 0 ... 255)
@@ -153,6 +167,10 @@ extension EditParameters: Codable {
         case wmtHue = "wmt_hue", wmtSat = "wmt_sat", wmtLum = "wmt_lum"
         case whlHue = "whl_hue", whlSat = "whl_sat", whlLum = "whl_lum"
         case hslHue = "hsl_hue", hslSat = "hsl_sat", hslLum = "hsl_lum"
+        // 降噪/锐化的键名沿用本仓的 snake_case。imagecake 侧四件（补光/高光柔化/
+        // 降噪/锐化）的具体键名尚未逐字核对，因此这两个键按「本仓扩展」对待：
+        // 读别人的预设时缺它们就落 0（关闭），不会把未知键当成自家键。
+        case denoise, sharpen
         case curveX = "curve_x", curveY = "curve_y"
         case bgEnabled = "bg_enabled", bgR = "bg_r", bgG = "bg_g", bgB = "bg_b", bgBlur = "bg_blur"
         case faceRestore = "face_restore"
@@ -167,6 +185,7 @@ extension EditParameters: Codable {
         "exposure", "contrast", "temperature", "tint", "saturation", "hue",
         "wsh_hue", "wsh_sat", "wsh_lum", "wmt_hue", "wmt_sat", "wmt_lum",
         "whl_hue", "whl_sat", "whl_lum", "hsl_hue", "hsl_sat", "hsl_lum",
+        "denoise", "sharpen",
         "curve_x", "curve_y", "bg_enabled", "bg_r", "bg_g", "bg_b", "bg_blur",
         "face_restore", "super_res", "preset_version", "requires"
     ]
@@ -194,6 +213,8 @@ extension EditParameters: Codable {
         hslHue = try c.decodeIfPresent([Double].self, forKey: .hslHue) ?? hslHue
         hslSat = try c.decodeIfPresent([Double].self, forKey: .hslSat) ?? hslSat
         hslLum = try c.decodeIfPresent([Double].self, forKey: .hslLum) ?? hslLum
+        denoise = try c.decodeIfPresent(Double.self, forKey: .denoise) ?? denoise
+        sharpen = try c.decodeIfPresent(Double.self, forKey: .sharpen) ?? sharpen
 
         if let xs = try c.decodeIfPresent([[Double]].self, forKey: .curveX),
            let ys = try c.decodeIfPresent([[Double]].self, forKey: .curveY),
@@ -227,6 +248,8 @@ extension EditParameters: Codable {
         try c.encode(hslHue, forKey: .hslHue)
         try c.encode(hslSat, forKey: .hslSat)
         try c.encode(hslLum, forKey: .hslLum)
+        try c.encode(denoise, forKey: .denoise)
+        try c.encode(sharpen, forKey: .sharpen)
         try c.encode(curves.map(\.x), forKey: .curveX)
         try c.encode(curves.map(\.y), forKey: .curveY)
         try c.encode(bgEnabled, forKey: .bgEnabled)

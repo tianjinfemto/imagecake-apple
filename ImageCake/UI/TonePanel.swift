@@ -2,10 +2,11 @@ import SwiftUI
 
 // 调色面板。
 //   线性域：曝光 / 色温 / 色调
-//   显示域：对比 / 饱和度 / 色相 / 四条曲线 / 三区色轮 / 八分区 HSL
+//   显示域：对比 / 饱和度 / 色相 / 四条曲线 / 空间滤波（降噪↔锐化）/ 三区色轮 / 八分区 HSL
 // 色轮与 HSL 的算法一直在 ToneEngine 里跑、参数也早就在预设里，
 // 缺的只是入口——所以 ColorGradingPanel 只负责把已有的算子接到滑杆上。
-// 背景与 AI 相关的入口都在 AI 面板，这里只管“颜色”。
+// 空间滤波要读邻域，不在 ToneEngine 的逐像素循环里，面板上仍然是两个滑杆。
+// 背景与 AI 相关的入口都在 AI 面板，这里只管“颜色与细节”。
 
 struct TonePanel: View {
     @EnvironmentObject private var model: EditorModel
@@ -31,6 +32,15 @@ struct TonePanel: View {
 
             SectionCard(title: "曲线", subtitle: "RGB + 单通道") {
                 CurveEditorView(curves: curves)
+            }
+
+            SectionCard(title: "细节", subtitle: "空间滤波") {
+                SliderRow(title: "降噪", range: 0 ... 100, value: double(\.denoise))
+                SliderRow(title: "锐化", range: 0 ... 100, value: double(\.sharpen))
+                Text("降噪是保边平滑（双边滤波），锐化是 unsharp mask；两者都在调色之后执行，顺序固定为降噪 → 锐化。作用在预览图上，导出时同步重算。")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Tokens.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             ColorGradingPanel().environmentObject(model)

@@ -60,6 +60,19 @@ struct ImageDocument: Sendable {
     func render(applyMask: Bool = true) -> DisplayImage {
         var display = ToneEngine.render(linear, params: params)
 
+        // 空间滤波：先降噪再锐化（反过来等于先把噪声锐化一遍）。
+        // 放在补丁合成**之前**：补丁是 AI 的输出（本身干净而锐利），
+        // 不该被再降噪一次或再锐化一次——那会让“修过的区域”和周围质感不一。
+        // 背景替换更靠后，因为它是逐像素 α 合成，不是空间操作。
+        if !params.isSpatialNeutral {
+            if params.denoise > 0 {
+                display = SpatialFilters.denoise(display, strength: params.denoise)
+            }
+            if params.sharpen > 0 {
+                display = SpatialFilters.sharpen(display, strength: params.sharpen)
+            }
+        }
+
         // 修复补丁：只在尺寸对得上时按相对量贴回去。
         if !patches.isEmpty {
             var bytes = display.rgba8()
