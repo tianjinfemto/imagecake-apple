@@ -81,12 +81,24 @@ actor ORTEngine {
         guard let value = outputs[outputName] else {
             throw AIError.inference("前向返回里没有 \(outputName)")
         }
-        let data = try value.tensorData() as Data
+        // tensorData()/typeInfo() 同理走 Optional 中转：头文件在源码与 pod archive
+        // 两份之间对 nullability 的标注不一致，显式 Optional 两种导入都能编译。
+        let raw: NSMutableData? = try value.tensorData()
+        guard let rawData = raw else {
+            throw AIError.inference("输出张量没有数据：\(outputName)")
+        }
+        let data = rawData as Data
         // 形状不在 ORTValue 上：官方头文件里只有 typeInfoWithError: →
         // ORTValueTypeInfo.tensorTypeAndShapeInfo.shape。写 value.tensorShape()
         // 是编译期直接失败（曾经就是这么写的）。
-        guard let typeInfo = try value.typeInfo(),
-              let tensorInfo = typeInfo.tensorTypeAndShapeInfo else {
+        //
+        // `typeInfo()` 的 nullable 标注在「SPM 源码目录的 ort_value.h」与「pod archive
+        // 产物里实际生效的头文件」之间不一致：前者标了 nullable，后者导入成非可选，
+        // 于是 `guard let x = try value.typeInfo()` 报
+        //   initializer for conditional binding must have Optional type
+        // 先落到显式 Optional 变量上，两种导入都成立。
+        let typeInfo: ORTValueTypeInfo? = try value.typeInfo()
+        guard let tensorInfo = typeInfo?.tensorTypeAndShapeInfo else {
             throw AIError.badShape("输出不是张量：\(outputName)")
         }
         let shape = tensorInfo.shape.map { $0.intValue }

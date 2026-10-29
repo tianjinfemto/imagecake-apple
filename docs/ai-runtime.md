@@ -31,6 +31,22 @@ packages:
 | `value.tensorData()` | 输出字节（float32） |
 | `value.typeInfo()?.tensorTypeAndShapeInfo?.shape` | 输出形状。**`ORTValue` 没有 `tensorShape()`**，写成那样是编译期失败（2026-10-27 已按官方 `ort_value.h` 修正） |
 
+### nullability 有两份真相（实际编译才暴露）
+
+`typeInfoWithError:` / `tensorDataWithError:` 在**两份头文件里标注不一致**：
+
+- GitHub 仓库 `objectivec/include/ort_value.h` 标了 `nullable`；
+- SPM 实际编译时生效的头文件（pod archive 产物侧）导入成**非可选**。
+
+后果：按源码头文件写 `guard let x = try value.typeInfo()` 会直接报
+`initializer for conditional binding must have Optional type, not 'ORTValueTypeInfo'`。
+**写法就固定为「先落到显式 Optional 变量」，两种导入都能编译**：
+
+```swift
+let raw: NSMutableData? = try value.tensorData()
+let typeInfo: ORTValueTypeInfo? = try value.typeInfo()
+```
+
 > 若升级 ORT 后这些签名有变，改动只集中在 `ImageCake/AI/ORTEngine.swift` 一个文件；
 > 其余任务代码只依赖 `TensorValue`（shape + Data）。
 
