@@ -159,4 +159,71 @@ final class CurveAndToneTests: XCTestCase {
         XCTAssertEqual(params.hslSat[0], 100, accuracy: 1e-6)
         XCTAssertTrue(params.hslHue.dropFirst().allSatisfy { $0 == 0 }, "短数组应补 0")
     }
+
+    // MARK: - 补光 / 高光柔化
+
+    private func grey(_ linear: Float) -> LinearImage {
+        LinearImage(size: PixelSize(width: 1, height: 1), pixels: [linear, linear, linear, 1])
+    }
+
+    /// 补光只抬暗部。亮部落在 shadows 权重 = 0 的区域（编码后 L≈0.91），
+    /// 必须一点不动——否则“补光”就变成了全局提亮。
+    func testFillLightLiftsShadowsOnly() {
+        var params = EditParameters()
+        params.fillLight = 100
+
+        let darkBase = ToneEngine.render(grey(0.05), params: EditParameters()).pixels[0]
+        let darkLit = ToneEngine.render(grey(0.05), params: params).pixels[0]
+        XCTAssertGreaterThan(darkLit, darkBase + 0.1, "暗部没有被抬起来")
+
+        let brightBase = ToneEngine.render(grey(0.8), params: EditParameters()).pixels[0]
+        let brightLit = ToneEngine.render(grey(0.8), params: params).pixels[0]
+        XCTAssertEqual(brightLit, brightBase, accuracy: 1e-5, "亮部不该被补光抬高")
+    }
+
+    /// 高光柔化只压高光。暗部的 highlights 权重为 0，同样必须不动。
+    func testHighlightSoftenPressesHighlightsOnly() {
+        var params = EditParameters()
+        params.highlightSoften = 100
+
+        let brightBase = ToneEngine.render(grey(0.8), params: EditParameters()).pixels[0]
+        let brightPressed = ToneEngine.render(grey(0.8), params: params).pixels[0]
+        XCTAssertLessThan(brightPressed, brightBase - 0.1, "高光没有被压下来")
+
+        let darkBase = ToneEngine.render(grey(0.05), params: EditParameters()).pixels[0]
+        let darkPressed = ToneEngine.render(grey(0.05), params: params).pixels[0]
+        XCTAssertEqual(darkPressed, darkBase, accuracy: 1e-5, "暗部不该被高光柔化影响")
+    }
+
+    /// 两项都只动亮度：灰色进必须灰色出，不能顺手染一个色。
+    func testToneRecoverKeepsNeutralGrey() {
+        var params = EditParameters()
+        params.fillLight = 60
+        params.highlightSoften = 60
+        let out = ToneEngine.render(grey(0.2), params: params)
+        XCTAssertEqual(out.pixels[0], out.pixels[1], accuracy: 1e-6)
+        XCTAssertEqual(out.pixels[1], out.pixels[2], accuracy: 1e-6)
+    }
+
+    /// 满强度也不该把值顶出 0...1：溢出在编码时会被截断成色块。
+    func testToneRecoverStaysInRange() {
+        var params = EditParameters()
+        params.fillLight = 100
+        params.highlightSoften = 100
+        for step in 0 ... 20 {
+            let value = Float(step) / 20
+            let out = ToneEngine.render(grey(value), params: params)
+            XCTAssertGreaterThanOrEqual(out.pixels[0], 0, "输入 \(value) 时越界")
+            XCTAssertLessThanOrEqual(out.pixels[0], 1, "输入 \(value) 时越界")
+        }
+    }
+
+    func testToneRecoverParametersClamp() {
+        var params = EditParameters()
+        params.fillLight = 500
+        params.highlightSoften = -30
+        params.clamp()
+        XCTAssertEqual(params.fillLight, 100)
+        XCTAssertEqual(params.highlightSoften, 0)
+    }
 }

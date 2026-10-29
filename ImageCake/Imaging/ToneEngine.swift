@@ -4,12 +4,17 @@ import Foundation
 //
 //   线性域：曝光 → 色温/色调
 //   转显示域
-//   显示域：对比 → 四条曲线（RGB 复合在前、单通道在后）→ 三区色轮
-//           → 八分区 HSL + 色相旋转 + 饱和度
+//   显示域：对比 → 补光/高光柔化 → 四条曲线（RGB 复合在前、单通道在后）
+//           → 三区色轮 → 八分区 HSL + 色相旋转 + 饱和度
+//   （降噪/锐化要读邻域，在 ToneEngine 之后做，见 SpatialFilters）
+//
+// 为什么补光/高光柔化在曲线之前：它们是“把动态范围拉回来”的动作，
+// 后面再走曲线做风格化；反过来先压曲线再补光，暗部已经被压成一团，
+// 补光只会把团结块成一片灰。
 //
 // 为什么色轮在 HSL 之前：色轮按亮度分区推整片颜色（阴影像左、高光偏右），
-// HSL 只动"落在某个色相附近"的像素。反过来会让 HSL 之后又整片染色，
-// 用户会觉得"我调的那块颜色被拉走了"。
+// HSL 只动“落在某个色相附近”的像素。反过来会让 HSL 之后又整片染色，
+// 用户会觉得“我调的那块颜色被拉走了”。
 //
 // 性能闸门：每一项在中性时整段跳过（isNeutral 那组谓词）。这不是优化癖好：
 // 12MP 图上一次 HSV 往返是秒级的，滑杆拖动会因此变成幻灯片。
@@ -34,6 +39,13 @@ enum ToneEngine {
         // —— 显示域预计算 ——
         let contrastGain = Float(pow(2.0, p.contrast / 100))
         let contrastActive = p.contrast != 0
+
+        // 补光 / 高光柔化：两端的系数都封顶 0.5，满强度时最暗处也只会
+        // 抬到一半、高光只会压掉一半——修图里这两项应当能看见
+        // “暗部起来了”而不至于把夜色变黄昏。
+        let fillAmount = Float(p.fillLight / 100) * 0.5
+        let softenAmount = Float(p.highlightSoften / 100) * 0.5
+        let toneRecoverActive = fillAmount > 0 || softenAmount > 0
 
         let curveLUTs: [[Float]]? = p.curves.allSatisfy(\.isIdentity) ? nil : p.curves.map { CurveMath.lut($0) }
 
@@ -85,6 +97,27 @@ enum ToneEngine {
                         r = (r - 0.5) * contrastGain + 0.5
                         g = (g - 0.5) * contrastGain + 0.5
                         b = (b - 0.5) * contrastGain + 0.5
+                    }
+
+                    if toneRecoverActive {
+                        // 两区权重和恒为 1（见 ColorMath.zoneWeights），所以一项生效时
+                        // 另一项在这个像素上必然是 0——补光不会去压高光，反之亦然。
+                        let y = ColorMath.luma(clamp01(r), clamp01(g), clamp01(b))
+                        let zones = ColorMath.zoneWeights(luma: y)
+                        if fillAmount > 0 {
+                            // 趋向白：v ← v + k·(1−v)。暗部抬得多，越亮抬得越少，不会死白。
+                            let k = fillAmount * zones.shadows
+                            r += k * (1 - r)
+                            g += k * (1 - g)
+                            b += k * (1 - b)
+                        }
+                        if softenAmount > 0 {
+                            // 趋向黑：v ← v − k·v。高光压得多，越暗压得越少，不会涂灰。
+                            let k = softenAmount * zones.highlights
+                            r -= k * r
+                            g -= k * g
+                            b -= k * b
+                        }
                     }
 
                     if let luts = curveLUTs {

@@ -2,7 +2,7 @@ import SwiftUI
 
 // 调色面板。
 //   线性域：曝光 / 色温 / 色调
-//   显示域：对比 / 饱和度 / 色相 / 四条曲线 / 空间滤波（降噪↔锐化）/ 三区色轮 / 八分区 HSL
+//   显示域：对比 / 补光 / 高光柔化 / 饱和度 / 色相 / 四条曲线 / 空间滤波（降噪↔锐化）/ 三区色轮 / 八分区 HSL
 // 色轮与 HSL 的算法一直在 ToneEngine 里跑、参数也早就在预设里，
 // 缺的只是入口——所以 ColorGradingPanel 只负责把已有的算子接到滑杆上。
 // 空间滤波要读邻域，不在 ToneEngine 的逐像素循环里，面板上仍然是两个滑杆。
@@ -18,6 +18,8 @@ struct TonePanel: View {
                           format: { String(format: "%+.2f EV", $0) },
                           value: double(\.exposure), defaultValue: 0)
                 SliderRow(title: "对比", range: -100 ... 100, value: double(\.contrast))
+                SliderRow(title: "补光", range: 0 ... 100, value: double(\.fillLight))
+                SliderRow(title: "高光柔化", range: 0 ... 100, value: double(\.highlightSoften))
                 SliderRow(title: "饱和度", range: -100 ... 100, value: double(\.saturation))
                 SliderRow(title: "色相", range: -180 ... 180, value: double(\.hue))
             }

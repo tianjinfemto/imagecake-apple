@@ -51,6 +51,14 @@ public struct EditParameters: Equatable, Sendable {
     public var saturation: Double = 0      // -100 ... +100
     public var hue: Double = 0             // -180 ... +180 度
 
+    // 补光 / 高光柔化：只动亮度、不染色（要染色请用三区色轮）。
+    // 形式选“趋向白 / 趋向黑”而不是线性加减：
+    //   v ← v + k·(1−v)  与  v ← v − k·v
+    // 两者都不会溢出，且在两端自然饱和——不会像线性加减那样把亮部推到
+    // 一片死白或者把阴影涂成灰块。
+    public var fillLight: Double = 0       // 0 ... 100，抬暗部
+    public var highlightSoften: Double = 0 // 0 ... 100，压高光
+
     // —— 显示域空间滤波 ——
     // 作用在调色**之后**（见 SpatialFilters）：要读邻域，进不了 ToneEngine 的逐像素循环。
     // 0 = 关。降噪先于锐化，反过来等于先把噪声锐化一遍。
@@ -97,6 +105,7 @@ public struct EditParameters: Equatable, Sendable {
 
     public var isDisplayNeutral: Bool {
         contrast == 0 && saturation == 0 && hue == 0
+            && fillLight == 0 && highlightSoften == 0
             && isWheelsNeutral && isHSLNeutral && curves.allSatisfy(\.isIdentity)
             && !bgEnabled
     }
@@ -127,6 +136,8 @@ public struct EditParameters: Equatable, Sendable {
         contrast = contrast.clamped(to: -100 ... 100)
         saturation = saturation.clamped(to: -100 ... 100)
         hue = hue.clamped(to: -180 ... 180)
+        fillLight = fillLight.clamped(to: 0 ... 100)
+        highlightSoften = highlightSoften.clamped(to: 0 ... 100)
         wshHue = wshHue.clamped(to: -180 ... 180); wshSat = wshSat.clamped(to: 0 ... 100); wshLum = wshLum.clamped(to: -100 ... 100)
         wmtHue = wmtHue.clamped(to: -180 ... 180); wmtSat = wmtSat.clamped(to: 0 ... 100); wmtLum = wmtLum.clamped(to: -100 ... 100)
         whlHue = whlHue.clamped(to: -180 ... 180); whlSat = whlSat.clamped(to: 0 ... 100); whlLum = whlLum.clamped(to: -100 ... 100)
@@ -163,6 +174,7 @@ public extension EditParameters {
 extension EditParameters: Codable {
     enum CodingKeys: String, CodingKey {
         case exposure, contrast, temperature, tint, saturation, hue
+        case fillLight = "fill_light", highlightSoften = "highlight_soften"
         case wshHue = "wsh_hue", wshSat = "wsh_sat", wshLum = "wsh_lum"
         case wmtHue = "wmt_hue", wmtSat = "wmt_sat", wmtLum = "wmt_lum"
         case whlHue = "whl_hue", whlSat = "whl_sat", whlLum = "whl_lum"
@@ -183,6 +195,7 @@ extension EditParameters: Codable {
     /// 加字段时这两处一起改（少改一处的症状是报告里把自家键列为未知）。
     public static let knownKeys: Set<String> = [
         "exposure", "contrast", "temperature", "tint", "saturation", "hue",
+        "fill_light", "highlight_soften",
         "wsh_hue", "wsh_sat", "wsh_lum", "wmt_hue", "wmt_sat", "wmt_lum",
         "whl_hue", "whl_sat", "whl_lum", "hsl_hue", "hsl_sat", "hsl_lum",
         "denoise", "sharpen",
@@ -199,6 +212,8 @@ extension EditParameters: Codable {
         tint = try c.decodeIfPresent(Double.self, forKey: .tint) ?? tint
         saturation = try c.decodeIfPresent(Double.self, forKey: .saturation) ?? saturation
         hue = try c.decodeIfPresent(Double.self, forKey: .hue) ?? hue
+        fillLight = try c.decodeIfPresent(Double.self, forKey: .fillLight) ?? fillLight
+        highlightSoften = try c.decodeIfPresent(Double.self, forKey: .highlightSoften) ?? highlightSoften
 
         wshHue = try c.decodeIfPresent(Double.self, forKey: .wshHue) ?? wshHue
         wshSat = try c.decodeIfPresent(Double.self, forKey: .wshSat) ?? wshSat
@@ -242,6 +257,8 @@ extension EditParameters: Codable {
         try c.encode(tint, forKey: .tint)
         try c.encode(saturation, forKey: .saturation)
         try c.encode(hue, forKey: .hue)
+        try c.encode(fillLight, forKey: .fillLight)
+        try c.encode(highlightSoften, forKey: .highlightSoften)
         try c.encode(wshHue, forKey: .wshHue); try c.encode(wshSat, forKey: .wshSat); try c.encode(wshLum, forKey: .wshLum)
         try c.encode(wmtHue, forKey: .wmtHue); try c.encode(wmtSat, forKey: .wmtSat); try c.encode(wmtLum, forKey: .wmtLum)
         try c.encode(whlHue, forKey: .whlHue); try c.encode(whlSat, forKey: .whlSat); try c.encode(whlLum, forKey: .whlLum)
