@@ -175,6 +175,7 @@ enum ImageLoader {
 enum ExportFormat: String, CaseIterable, Identifiable, Sendable {
     case png8
     case png16
+    case tiff16
     case jpeg
     case heif
 
@@ -184,6 +185,7 @@ enum ExportFormat: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .png8: return "PNG 8bit"
         case .png16: return "PNG 16bit"
+        case .tiff16: return "TIFF 16bit"
         case .jpeg: return "JPEG"
         case .heif: return "HEIF"
         }
@@ -192,6 +194,7 @@ enum ExportFormat: String, CaseIterable, Identifiable, Sendable {
     var fileExtension: String {
         switch self {
         case .png8, .png16: return "png"
+        case .tiff16: return "tiff"
         case .jpeg: return "jpg"
         case .heif: return "heic"
         }
@@ -204,6 +207,8 @@ enum ImageExporter {
         switch format {
         case .png16:
             data = try PNG16Writer.encode(image)
+        case .tiff16:
+            data = try TIFF16Writer.encode(image)
         case .png8:
             data = try encodeWithImageIO(image, type: .png, quality: 1, flatten: false)
         case .jpeg:

@@ -52,6 +52,47 @@ final class ImagingTests: XCTestCase {
         XCTAssertGreaterThan(Int(bytes[lastIndex]), 250)
     }
 
+    /// 与 PNG-16 同样的验证强度：用 ImageIO 读回来，而不是只看文件头。
+    /// 自写容器最容易错的是 IFD 里的偏移（StripOffsets / BitsPerSample），
+    /// 而那些错了的典型症状是「看起来导出了，打开是黑图」。
+    func testTIFF16IsReadableByImageIO() throws {
+        let display = makeDisplay(width: 8, height: 6)
+        let data = try TIFF16Writer.encode(display)
+        // 小端 TIFF："II" + 42（0x2A 0x00）
+        XCTAssertEqual(data.prefix(4), Data([0x49, 0x49, 0x2A, 0x00]))
+
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+            return XCTFail("ImageIO 读不了自家 TIFF-16")
+        }
+        XCTAssertEqual(image.width, 8)
+        XCTAssertEqual(image.height, 6)
+        XCTAssertEqual(image.bitsPerComponent, 16, "位深没传到 16")
+        XCTAssertEqual(image.bitsPerPixel, 64, "4 通道 × 16bit 应为 64")
+
+        // 画进 8bit 上下文核对颜色（16bit → 8bit 有一次量化）。
+        let buffer = ImageLoader.drawRGBA8(image)
+        XCTAssertNotNil(buffer)
+        let bytes = [UInt8](buffer!.data)
+        XCTAssertLessThanOrEqual(abs(Int(bytes[0]) - 0), 2, "左上角红色应为 0")
+        XCTAssertLessThanOrEqual(abs(Int(bytes[1]) - 0), 2, "左上角绿色应为 0")
+        let lastIndex = (5 * 8 + 7) * 4
+        XCTAssertGreaterThan(Int(bytes[lastIndex]), 250, "右下角红色应为白")
+    }
+
+    func testTIFF16RejectsEmptyImage() {
+        let empty = DisplayImage(size: .zero, pixels: [])
+        XCTAssertThrowsError(try TIFF16Writer.encode(empty))
+    }
+
+    /// 接线检查：导出管线真的走到自写 TIFF，而不是被当成未知格式。
+    func testExportPipelineEncodesTIFF16() throws {
+        let outcome = ExportOutcome(display: makeDisplay(width: 8, height: 6), notes: [])
+        let data = try ExportPipeline.encode(outcome, format: .tiff16, quality: 1, maxEdge: 0)
+        XCTAssertEqual(Data(data.prefix(2)), Data([0x49, 0x49]))
+        XCTAssertEqual(ExportFormat.tiff16.fileExtension, "tiff")
+    }
+
     func testResizeKeepsRequestedSizeAndAlpha() {
         let linear = LinearImage(size: PixelSize(width: 40, height: 30),
                                  pixels: Array(repeating: [Float(0.5), 0.5, 0.5, 1], count: 40 * 30).flatMap { $0 })

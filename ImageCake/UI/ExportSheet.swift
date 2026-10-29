@@ -33,7 +33,7 @@ enum ExportDestination: String, CaseIterable, Identifiable {
 }
 
 struct ExportFile: FileDocument {
-    static var readableContentTypes: [UTType] { [.png, .jpeg, .heic, .json] }
+    static var readableContentTypes: [UTType] { [.png, .tiff, .jpeg, .heic, .json] }
 
     var data: Data
 
@@ -76,6 +76,11 @@ struct ExportSheet: View {
                     .pickerStyle(.segmented)
                     if format == .png16 {
                         Text("PNG-16 用自家写入器（zlib stored 块，不压缩）：端序与 filter 都在源码里可读；文件会偏大。")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Tokens.textSecondary)
+                    }
+                    if format == .tiff16 {
+                        Text("TIFF-16 用自家写入器（baseline 6.0、小端、单 strip、不压缩）：偏移与 tag 都在源码里可读；适合交给打印/后期的链路，文件会偏大。")
                             .font(.system(size: 10))
                             .foregroundStyle(Tokens.textSecondary)
                     }
@@ -204,6 +209,7 @@ struct ExportSheet: View {
     private var contentType: UTType {
         switch format {
         case .png8, .png16: return .png
+        case .tiff16: return .tiff
         case .jpeg: return .jpeg
         case .heif: return .heic
         }
@@ -218,7 +224,7 @@ struct ExportSheet: View {
     }
 
     private var photoNote: String {
-        if format == .png16 {
+        if format == .png16 || format == .tiff16 {
             return "相册会按 8bit 转存，16bit 交付件请用「文件」或「两者」。"
         }
         return "写入后在「照片」里直接可见；「两者」会再弹一次文件保存，适合既归档又分享。"

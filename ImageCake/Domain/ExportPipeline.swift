@@ -18,14 +18,16 @@ struct ExportOutcome: Sendable {
 }
 
 enum ExportError: LocalizedError {
-    /// PNG-16 是“不压缩 + 双份缓冲”的写法：24MP 的峰值约 600MB，
-    /// 再往上就是被系统杀掉而不是报错。点名拒绝，不让它变成闪退。
-    case png16TooLarge(pixels: Int, limit: Int)
+    /// 不压缩 16bit 格式（PNG-16 / TIFF-16）都是“不压缩 + 双份缓冲”的写法：
+    /// 24MP 的峰值约 600MB，再往上就是被系统杀掉而不是报错。
+    /// 点名拒绝，不让它变成闪退。
+    case uncompressedTooLarge(kind: String, pixels: Int, limit: Int)
 
     var errorDescription: String? {
         switch self {
-        case .png16TooLarge(let pixels, let limit):
-            return "[png16_too_large] 这张图 \(pixels / 1_000_000)MP，超过 PNG-16 的 \(limit / 1_000_000)MP 上限；请改用 JPEG/PNG-8，或先压长边"
+        case .uncompressedTooLarge(let kind, let pixels, let limit):
+            let token = kind.replacingOccurrences(of: "-", with: "").lowercased()
+            return "[\(token)_too_large] 这张图 \(pixels / 1_000_000)MP，超过 \(kind) 的 \(limit / 1_000_000)MP 上限；请改用 JPEG/PNG-8，或先压长边"
         }
     }
 }
@@ -41,7 +43,8 @@ enum ExportPipeline {
         return 16_000_000
     }
 
-    /// PNG-16 是“不压缩 + 双份缓冲”的写法，再叠上内存档。
+    /// 不压缩 16bit 格式的像素上限，按物理内存分档。PNG-16 与 TIFF-16 共用：
+    /// 两者都是「不压缩 + 双份缓冲」，内存峰值同一个量级。
     static var maxPNG16Pixels: Int {
         let ram = ProcessInfo.processInfo.physicalMemory
         if ram >= 7_000_000_000 { return 24_000_000 }
@@ -135,16 +138,25 @@ enum ExportPipeline {
 
         switch format {
         case .png16:
-            guard display.size.pixelCount <= maxPNG16Pixels else {
-                throw ExportError.png16TooLarge(pixels: display.size.pixelCount, limit: maxPNG16Pixels)
-            }
+            try ensureUncompressedFits(display, kind: "PNG-16")
             return try PNG16Writer.encode(display)
+        case .tiff16:
+            try ensureUncompressedFits(display, kind: "TIFF-16")
+            return try TIFF16Writer.encode(display)
         case .png8, .jpeg, .heif:
             let url = FileManager.default.temporaryDirectory
                 .appendingPathComponent("imagecake-export-\(UUID().uuidString).\(format.fileExtension)")
             defer { try? FileManager.default.removeItem(at: url) }
             try ImageExporter.write(display, to: url, format: format, quality: quality)
             return try Data(contentsOf: url)
+        }
+    }
+
+    private static func ensureUncompressedFits(_ display: DisplayImage, kind: String) throws {
+        guard display.size.pixelCount <= maxPNG16Pixels else {
+            throw ExportError.uncompressedTooLarge(kind: kind,
+                                                   pixels: display.size.pixelCount,
+                                                   limit: maxPNG16Pixels)
         }
     }
 }

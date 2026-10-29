@@ -43,7 +43,7 @@
 |---|---|---|
 | 预设（JSON，v37） | ✅ | 键名逐字对齐；缺键落出厂；未知键点名；比本程序新拒收；外部资产依赖只登记不加载 |
 | PNG-8 / JPEG / HEIF | ✅ | ImageIO |
-| PNG-16 | ✅ | 自家容器写入器（zlib stored 块）；**TIFF-16 未做** |
+| PNG-16 / TIFF-16 | ✅ | 两个自家容器写入器：PNG-16 用 zlib stored 块；TIFF-16 用 baseline 6.0（小端、单 strip、不压缩、RGBA + 未预乘 alpha）。都用 ImageIO 读回验证，不只看文件头 |
 | 色彩空间（ICC / lcms2） | ⛔ | 输入 ICC 由 Core Graphics 在解码时转 sRGB；输出嵌 profile 未做 |
 | 水印 / 边框 / 文字贴纸 | ⛔ | 面板与导出链入口都未做 |
 | 拼图排版 | ⛔ | 模板名与排版几何未移植 |
@@ -57,7 +57,7 @@
 
 | imagecake | 本仓 |
 |---|---|
-| 1000+ C++ 断言（Catch2 风格自研） | 68 格 XCTest（几何/色彩/色轮与 HSL/色轮坐标/画布视口/空间滤波/补光与高光/文件名模板/容器/预设契约） |
+| 1000+ C++ 断言（Catch2 风格自研） | 71 格 XCTest（几何/色彩/色轮与 HSL/色轮坐标/画布视口/空间滤波/补光与高光/文件名模板/容器/预设契约） |
 | 无头 CLI 回归 | 无（v1 不做 CLI） |
 | 权重清单 + 双校验 | ✅ 同一份 `models.json`，脚本与 App 共用 |
 | 缺件点名令牌 | ✅ `[no_model:file]` / `[fallback:vision]` / `[closed_eyes]` / `[too_large]` / `[patch_scaled]` |
