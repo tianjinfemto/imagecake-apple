@@ -66,6 +66,8 @@ targets:
         # iPhone + iPad。iPad 是 v1 的主目标，但保留 iPhone 只多一行声明。
         TARGETED_DEVICE_FAMILY: "1,2"
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        # 双端都要声明主图标集，否则 actool 报「没有匹配的 AppIcon」直接断送整个构建。
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_PREVIEWS: "YES"
         SWIFT_EMIT_LOC_STRINGS: "YES"
         # macOS 本地跑（未签名）时不因 Team 缺失而失败；上架前换成自己的 Team。
@@ -84,10 +86,13 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.beautyinapple.imagecake.tests
         GENERATE_INFOPLIST_FILE: "YES"
-        # 显式写 TEST_HOST：EXECUTABLE_FOLDER_PATH 在 macOS 是
-        # Contents/MacOS、在 iOS 是 .app 自身，一条设置两平台同时成立。
-        # （不写 hostApplication —— 那不是 XcodeGen 的键。）
-        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/$(EXECUTABLE_FOLDER_PATH)/$(EXECUTABLE_NAME)"
+        # TEST_HOST 要指向「宿主 App」的可执行文件，而宿主 App 的容器结构两平台不同：
+        # iOS 是 App.app/ImageCake，macOS 是 App.app/Contents/MacOS/ImageCake。
+        # 早期写法 $(BUILT_PRODUCTS_DIR)/$(EXECUTABLE_FOLDER_PATH)/$(EXECUTABLE_NAME)
+        # 读的是**测试目标自己**的变量，在 macOS 上展开成 .../ImageCakeTests.xctest/Contents/MacOS/ImageCakeTests
+        # ——xcodebuild 直接报 "Could not find test host"；改成按 SDK 条件写死宿主路径。
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/ImageCake.app/ImageCake"
+        "TEST_HOST[sdk=macosx*]": "$(BUILT_PRODUCTS_DIR)/ImageCake.app/Contents/MacOS/ImageCake"
         BUNDLE_LOADER: "$(TEST_HOST)"
 
 schemes:
