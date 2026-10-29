@@ -66,8 +66,9 @@ open ImageCake.xcodeproj
 | 权重 | App 内「模型 → 下载」或从 Files 导入；GFPGAN 340MB，建议先只装 core 档 |
 
 > 以上是**配置与设计上的结论**。构建侧已在 CI 的 iOS Simulator 目标上验证通过（2026-10-29），
-> 但**还没有在任何 iPad 模拟器或真机上启动过 App**。首次运行请先做：
-> 打开一张 JPEG → 拖一根滑杆（验证渲染）→ 点「抠图」（验证 Vision 兜底）→ 框选后「消除」（验证 ORT）。
+> 但**还没有在任何 iPad 模拟器或真机上启动过 App**。
+> 真机调测按 [docs/device-check.md](docs/device-check.md) 走：那里按「冒烟 → 新功能 → 回归」分层，
+> 每条都写了预期与失败时该看哪一层，并标出了两处“看着像 bug 其实是设计”的地方。
 
 ### 权重
 
