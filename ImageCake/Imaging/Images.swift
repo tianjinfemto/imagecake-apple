@@ -148,7 +148,9 @@ struct DisplayImage: Sendable {
             let src = raw.bindMemory(to: UInt8.self)
             out.withUnsafeMutableBufferPointer { dst in
                 var i = 0
-                while i < out.count {
+                // 写 dst.count 而不是 out.count：withUnsafeMutableBufferPointer 的闭包内
+                // 再读 out 属于重叠访问，Swift 直接报 overlapping accesses to 'out'。
+                while i < dst.count {
                     dst[i] = Float(src[i]) / 255
                     i += 1
                 }
