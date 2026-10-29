@@ -106,6 +106,13 @@ struct ImageDocument: Sendable {
         let alpha = mask.resized(to: canvas)
         guard !alpha.isEmpty else { return display }
 
+        // 边缘去色溢出必须在合成之前：合成本身是 straight alpha 混合，
+        // 边缘那圈混了原背景的 RGB 会按 (1−α) 留下来。
+        // 虚化路径同样需要——糊掉的背景也会把脏色混进边缘。
+        let personImage = params.defringe > 0
+            ? EdgeDefringe.apply(display, alpha: alpha, strength: params.defringe)
+            : display
+
         let background: [Float]
         if params.bgBlur > 0 {
             let radius = max(1, Int(Double(params.bgBlur) / 100 * Double(canvas.longEdge) * 0.03))
@@ -133,7 +140,7 @@ struct ImageDocument: Sendable {
 
         var out = [Float](repeating: 0, count: canvas.pixelCount * 4)
         let alphaBytes = [UInt8](alpha.data)
-        display.pixels.withUnsafeBufferPointer { person in
+        personImage.pixels.withUnsafeBufferPointer { person in
             background.withUnsafeBufferPointer { bg in
                 out.withUnsafeMutableBufferPointer { dst in
                     var i = 0

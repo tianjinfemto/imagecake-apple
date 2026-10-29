@@ -116,6 +116,20 @@ struct AIPanel: View {
                 .opacity(model.params.bgEnabled ? 1 : 0.5)
                 .allowsHitTesting(model.params.bgEnabled)
 
+            SliderRow(title: "边缘去色溢出", range: 0 ... 100,
+                      value: Binding(
+                        get: { model.params.defringe },
+                        set: { value in model.updateParams { $0.defringe = value } }
+                      ))
+                .opacity(model.params.bgEnabled ? 1 : 0.5)
+                .allowsHitTesting(model.params.bgEnabled)
+
+            Text("抠图边缘的半透明像素混着原背景色（白底发白、绿幕发绿）。这一项用邻域里的实心颜色替换它们，α 不变；0 = 关，找不到实心邻居的像素原样保留。")
+                .font(.system(size: 10))
+                .foregroundStyle(Tokens.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .opacity(model.params.bgEnabled ? 1 : 0.5)
+
             if model.params.bgEnabled && model.document?.hasPersonMask != true {
                 Text("[no_mask] 还没有人像 α：先抠图，否则这一整段会被跳过（导出报告里也会点名）。")
                     .font(.system(size: 10))

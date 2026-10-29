@@ -86,6 +86,10 @@ public struct EditParameters: Equatable, Sendable {
     public var bgG: Double = 255
     public var bgB: Double = 255
     public var bgBlur: Double = 0          // 0...100，0 = 只换色不虚化
+    /// 边缘去色溢出：抠图边缘那圈半透明像素的 RGB 混着原背景色（白底发白、
+    /// 绿幕发绿），直接与纯色底合成会得到一圈脏边。0 = 关。
+    /// 它只在有人像 α 且真要换底/虚化时才有意义，所以不参与 isDisplayNeutral。
+    public var defringe: Double = 0        // 0...100
 
     // —— 交付端 ——
     public var faceRestore: Double = 0     // 0...100，只挂导出
@@ -150,6 +154,7 @@ public struct EditParameters: Equatable, Sendable {
         for i in curves.indices where !curves[i].isValid { curves[i] = .identity }
         bgR = bgR.clamped(to: 0 ... 255); bgG = bgG.clamped(to: 0 ... 255); bgB = bgB.clamped(to: 0 ... 255)
         bgBlur = bgBlur.clamped(to: 0 ... 100)
+        defringe = defringe.clamped(to: 0 ... 100)
         faceRestore = faceRestore.clamped(to: 0 ... 100)
         if ![0, 2, 4].contains(superRes) { superRes = 0 }
     }
@@ -185,6 +190,7 @@ extension EditParameters: Codable {
         case denoise, sharpen
         case curveX = "curve_x", curveY = "curve_y"
         case bgEnabled = "bg_enabled", bgR = "bg_r", bgG = "bg_g", bgB = "bg_b", bgBlur = "bg_blur"
+        case defringe
         case faceRestore = "face_restore"
         case superRes = "super_res"
         case presetVersion = "preset_version"
@@ -200,6 +206,7 @@ extension EditParameters: Codable {
         "whl_hue", "whl_sat", "whl_lum", "hsl_hue", "hsl_sat", "hsl_lum",
         "denoise", "sharpen",
         "curve_x", "curve_y", "bg_enabled", "bg_r", "bg_g", "bg_b", "bg_blur",
+        "defringe",
         "face_restore", "super_res", "preset_version", "requires"
     ]
 
@@ -242,6 +249,7 @@ extension EditParameters: Codable {
         bgG = try c.decodeIfPresent(Double.self, forKey: .bgG) ?? bgG
         bgB = try c.decodeIfPresent(Double.self, forKey: .bgB) ?? bgB
         bgBlur = try c.decodeIfPresent(Double.self, forKey: .bgBlur) ?? bgBlur
+        defringe = try c.decodeIfPresent(Double.self, forKey: .defringe) ?? defringe
         faceRestore = try c.decodeIfPresent(Double.self, forKey: .faceRestore) ?? faceRestore
         superRes = try c.decodeIfPresent(Int.self, forKey: .superRes) ?? superRes
         presetVersion = try c.decodeIfPresent(Int.self, forKey: .presetVersion) ?? presetVersion
@@ -274,6 +282,7 @@ extension EditParameters: Codable {
         try c.encode(bgG, forKey: .bgG)
         try c.encode(bgB, forKey: .bgB)
         try c.encode(bgBlur, forKey: .bgBlur)
+        try c.encode(defringe, forKey: .defringe)
         try c.encode(faceRestore, forKey: .faceRestore)
         try c.encode(superRes, forKey: .superRes)
         try c.encode(presetVersion, forKey: .presetVersion)
