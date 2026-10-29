@@ -66,7 +66,8 @@ open ImageCake.xcodeproj
 | 内存档位 | 导出/超清上限按物理内存分档（4/6/8GB → 16/24/32MP 渲染、12/32/60MP 超清），超出点名拒绝 |
 | 权重 | App 内「模型 → 下载」或从 Files 导入；GFPGAN 340MB，建议先只装 core 档 |
 
-> 以上是**配置与设计上的结论**；本机无 Xcode，尚未在 iPad 模拟器/真机上实际跑过。首次运行请先做：
+> 以上是**配置与设计上的结论**。构建侧已在 CI 的 iOS Simulator 目标上验证通过（2026-10-29），
+> 但**还没有在任何 iPad 模拟器或真机上启动过 App**。首次运行请先做：
 > 打开一张 JPEG → 拖一根滑杆（验证渲染）→ 点「抠图」（验证 Vision 兜底）→ 框选后「消除」（验证 ORT）。
 
 ### 权重
@@ -145,8 +146,14 @@ AI 资产：人像 α → 换底色/背景虚化；修复补丁（相对量）�
 | 手段 | 覆盖 |
 |---|---|
 | 单元测试（22 格） | 曲线单调/恒等/坏输入回退；中性调色只做 sRGB 编码；+1EV 线性翻倍；色相旋转；RGBA8 往返；**PNG-16 经 ImageIO 读回**；分块覆盖恰好一次、加边不越界；外接框/膨胀/羽化；补丁合成只动遮罩内；补丁随画布缩放；预设往返/未知键/太新拒收/缺键落出厂；清单解码与下载 URL；MODNet 输入尺寸；GFPGAN 方框几何 |
-| 静态审查 | 全仓 Swift 源码逐文件对过：`Data`/指针生命周期、`UInt8` 越界取整、`Sendable` 边界 |
-| **未做** | 本机是 Windows，没有 Xcode/Swift 工具链：**尚未真正编译、未在 Mac/iPad 上跑过**。ORT 绑定已按官方头文件逐条核准（含修正 `ORTValue` 没有 `tensorShape()` 这一处）；剩余风险集中在 XcodeGen 版本与 SwiftUI 平台 API |
+| **真实编译**（2026-10-29） | GitHub Actions 的 macOS runner：`xcodebuild test` 在 macOS 上编过并跑完 **22 格断言全绿**；同一套代码的 iOS Simulator 目标也构建成功（Xcode 16.4 + XcodeGen） |
+| 尚未做 | **未在 iPad 模拟器 / 真机上实际运行过**（CI 只做构建，不启动 App）。ORT 权重也没有在真机上跑过推导——CI 不下载 660MB 权重 |
+
+> 首次真实编译暴露并修掉了 4 个问题，全是“没编译过就发现不了”的类型：
+> 缺 AppIcon 资产集（actool 直接 BUILD FAILED）、`TEST_HOST` 在 macOS 上解析成测试包
+> 自己、`Resampler` 对 `let` 常量就地修改、`withUnsafeMutableBufferPointer` 闭包内
+> 重叠访问原数组。另有一条是 ORT 头文件两份之间 nullability 标注不一致，
+> 详见 [docs/ai-runtime.md](docs/ai-runtime.md)。
 
 ### CI（没有 Mac 时的验证路径）
 
@@ -163,7 +170,8 @@ AI 资产：人像 α → 换底色/背景虚化；修复补丁（相对量）�
 - 失败在 **Test on macOS** 的编译阶段 → 先看 `ORTEngine.swift` 的绑定签名（升级 ORT 后最常见）；
 - 失败在 **Test on macOS** 的运行阶段 → 把 `macos-test-results` 里的 `.xcresult` 下载打开，断言名会直接指向几何/色彩/容器中的哪一条。
 
-CI 文件是随这次交付一起加的，**尚未在 GitHub 上跑过**；首次运行的结果就是本项目的第一次真实编译。
+CI 已跑通（首次全绿：run [40809005087](https://github.com/tianjinfemto/imagecake-apple/actions/runs/40809005087)）。
+两个 job 并行，一轮约 2 分钟；失败时先看是哪一个 step 变红，再按下表分流。
 
 ---
 
