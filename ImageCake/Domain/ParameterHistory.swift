@@ -18,16 +18,24 @@ import Foundation
 // 是 UI 的节奏问题（EditorModel 用防抖解决），不是栈的职责。栈只保证
 // 「相邻且相同的值不重复入栈」。
 
-struct ParameterHistory<Value: Equatable>: Equatable {
-    /// 栈上限。50 步够覆盖一次常规精修的回退，又不至于把内存拖长。
-    static let defaultLimit = 50
+// 栈上限的默认值。
+//
+// 为什么不放进 `ParameterHistory` 里当 `static let`：Swift 不允许泛型类型有
+// 存储型静态成员（`static stored properties not supported in generic types`），
+// 泛型参数会让「同一个类型的不同实例共享哪一个静态存储」没有定义。
+// 单独开一个无泛型的枚举当命名空间，值仍然只有一处可改。
+enum HistoryLimit {
+    /// 50 步够覆盖一次常规精修的回退，又不至于把内存拖长。
+    static let steps = 50
+}
 
+struct ParameterHistory<Value: Equatable>: Equatable {
     private(set) var past: [Value] = []
     private(set) var future: [Value] = []
     private(set) var present: Value
     let limit: Int
 
-    init(initial: Value, limit: Int = ParameterHistory.defaultLimit) {
+    init(initial: Value, limit: Int = HistoryLimit.steps) {
         self.present = initial
         self.limit = max(1, limit)
     }

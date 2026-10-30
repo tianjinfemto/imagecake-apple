@@ -156,10 +156,12 @@ AI 资产：人像 α → 换底色/背景虚化；修复补丁（相对量）�
 | **真实编译**（2026-10-30） | GitHub Actions macOS runner：`xcodebuild test` 在 macOS 上跑完 **113 格全绿**；同一批断言在 **iPhone 16 Pro 模拟器**上也跑完 **113 格 / 0 failed / 0 skipped**（宿主 App 被真实拉起），Xcode 16.4 + XcodeGen |
 | 尚未做 | **未在真机上跑过**（模拟器不是 iPad：触摸压感、Apple Pencil、真 GPU 路径、系统权限弹窗都模拟不了）。ORT 权重也没有在真机上跑过推导——CI 不下载 660MB 权重 |
 
-> 首次真实编译暴露并修掉了 4 个问题，全是“没编译过就发现不了”的类型：
+> 真实编译累计暴露并修掉了 5 个问题，全是“没编译过就发现不了”的类型：
 > 缺 AppIcon 资产集（actool 直接 BUILD FAILED）、`TEST_HOST` 在 macOS 上解析成测试包
 > 自己、`Resampler` 对 `let` 常量就地修改、`withUnsafeMutableBufferPointer` 闭包内
-> 重叠访问原数组。另有一条是 ORT 头文件两份之间 nullability 标注不一致，
+> 重叠访问原数组，以及泛型化 `ParameterHistory` 后的 `static let`（Swift 不允许
+> 泛型类型有存储型静态成员，只能把常量搬到类型外面）。另有一条是 ORT 头文件
+> 两份之间 nullability 标注不一致，
 > 详见 [docs/ai-runtime.md](docs/ai-runtime.md)。
 
 ### CI（没有 Mac 时的验证路径）
