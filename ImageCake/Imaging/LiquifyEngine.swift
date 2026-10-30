@@ -23,7 +23,7 @@ struct LiquifyStroke: Equatable {
     /// 0...1，通常由压感或笔刷强度给出。
     var strength: Double
 
-    init(from: CGPoint, to: CGPoint, radius: Double = 0.08, strength: Double = 1) {
+    init(from: CGPoint = .zero, to: CGPoint = .zero, radius: Double = 0.08, strength: Double = 1) {
         self.from = from
         self.to = to
         self.radius = radius
