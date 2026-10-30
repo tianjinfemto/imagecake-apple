@@ -1,11 +1,14 @@
 # 首次构建与回归：GitHub Actions 的 macOS runner。
 #
 # 为什么需要它：开发机是 Windows，没有 xcodebuild/Swift；这份工作流是
-# "能不能编译"的最短验证路径。两个 job 分工明确——
-#   · macos-test：App 宿主式单测（22 格），验证几何/色彩/容器/预设契约；
-#   · ios-build：只构建 iOS Simulator 目标，抓平台特有的编译错误
-#     （UIKit/AppKit 分支、Info.plist 键、SwiftUI 的 iOS-only API）。
-# iOS 上不跑测试：同一批断言在 macOS 已跑过，再跑一遍只是多花 runner 分钟。
+# "能不能编译"的最短验证路径。job 分工明确——
+#   · macos-test：App 宿主式单测（113 格），验证几何/色彩/容器/预设契约；
+#   · ios-build：先构建 iOS Simulator 目标抓平台特有的编译错误
+#     （UIKit/AppKit 分支、Info.plist 键、SwiftUI 的 iOS-only API），
+#     再在同一个 job 里把同一批断言在模拟器上真跑一遍；
+#   · ios-unsigned-ipa：产出未签名 ipa 给侧载（只在 main / 手动触发时跑）。
+# iOS 要跑测试的理由不是"多一层保险"：`#if os(iOS)` 包住的代码
+# （PhotoLibraryWriter / 相册写回）在 macOS 上根本不存在，一行都没执行过。
 
 name: CI
 
@@ -76,9 +79,10 @@ jobs:
           if-no-files-found: ignore
 
   ios-build:
-    name: iPadOS · build (simulator)
+    name: iPadOS · build + tests (simulator)
     runs-on: macos-15
-    timeout-minutes: 45
+    # 比原来宽：启动一台冷模拟器就要一分多钟。
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -111,6 +115,47 @@ jobs:
             -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath build/DerivedData \
             build
+
+      - name: Test on iOS Simulator
+        # 为什么要在 iOS 上再跑一遍同名断言：macOS 那 113 格碰不到 `#if os(iOS)` 的
+        # 代码（PhotoLibraryWriter、相册写回），而 iPad 才是 v1 的主目标——
+        # 「编得过」不等于「在 iOS 运行时上起得来」。
+        #
+        # 设备名不写死：runner 镜像换了 Xcode 就没有那台设备，xcodebuild 会直接报
+        # "Unable to find a device"，红得让人误以为代码有问题。从 simctl 的 JSON
+        # 里挑一台现成的 iPhone（主屏小、跑得比 iPad 快），挑不到就 fail 并打印可用列表。
+        run: |
+          set -euo pipefail
+          # xcresult 路径已存在时 xcodebuild 会直接报错退出，跟测试本身无关。
+          rm -rf build/IOSTest.xcresult
+          device=$(xcrun simctl list devices -j | python3 -c '
+          import json, sys
+          data = json.load(sys.stdin)["devices"]
+          for runtime, items in data.items():
+              for d in items:
+                  if d.get("isAvailable") and d["name"].startswith("iPhone"):
+                      print(d["name"]); sys.exit(0)
+          sys.exit(1)') || {
+            echo "没有可用的 iPhone 模拟器，当前设备列表："
+            xcrun simctl list devices | head -60
+            exit 1
+          }
+          echo "选用模拟器：$device"
+          xcodebuild \
+            -project ImageCake.xcodeproj \
+            -scheme ImageCake \
+            -destination "platform=iOS Simulator,name=$device" \
+            -derivedDataPath build/DerivedData \
+            -resultBundlePath build/IOSTest.xcresult \
+            test
+
+      - name: Upload iOS test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-test-results
+          path: build/IOSTest.xcresult
+          if-no-files-found: ignore
 
   # 未签名 ipa 产物：给没有 Mac 的人用 Sideloadly / AltStore 重签后装到 iPad。
   #

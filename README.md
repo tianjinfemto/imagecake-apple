@@ -68,7 +68,8 @@ open ImageCake.xcodeproj
 | 权重 | App 内「模型 → 下载」或从 Files 导入；GFPGAN 340MB，建议先只装 core 档 |
 
 > 以上是**配置与设计上的结论**。构建侧已在 CI 的 iOS Simulator 目标上验证通过（2026-10-29），
-> 但**还没有在任何 iPad 模拟器或真机上启动过 App**。
+> 从本轮起宿主 App 会在 iPhone 模拟器里被真正拉起并跑完 113 格（见 §四 CI）——
+> 但这仍然不是 iPad：分屏尺寸、Apple Pencil、相册权限弹窗、手感都模拟不了。
 > 真机调测按 [docs/device-check.md](docs/device-check.md) 走：那里按「冒烟 → 新功能 → 回归」分层，
 > 每条都写了预期与失败时该看哪一层，并标出了两处“看着像 bug 其实是设计”的地方。
 
@@ -152,7 +153,7 @@ AI 资产：人像 α → 换底色/背景虚化；修复补丁（相对量）�
 |---|---|
 | 单元测试（113 格） | 曲线单调/恒等/坏输入回退；中性调色只做 sRGB 编码；+1EV 线性翻倍；色相旋转；**三区色轮只碰自己的亮度区、八分区 HSL 的相邻带权重分摊**；**色轮坐标几何（方向/力度/死区/往返）**；**画布视口几何（缩放锚点/平移夹紧/归一化往返）**；**降噪降方差且保边、锐化产生 overshoot 且不越界**；**补光只抬暗部、高光柔化只压高光且不染灰色**；**文件名模板的占位符/非法字符/空模板兜底**；**去色边只改边缘色、实心不动、无实心邻居时保守**；**撤销栈的空历史/重做失效/超限丢最旧**；**笔迹栅格化的连通/软硬边/半径归一化/重叠不叠加**；**液化四个方向与零位移恒等**；RGBA8 往返；**PNG-16 与 TIFF-16 经 ImageIO 读回**；分块覆盖恰好一次、加边不越界；外接框/膨胀/羽化；补丁合成只动遮罩内；补丁随画布缩放；预设往返/未知键/太新拒收/缺键落出厂；清单解码与下载 URL；MODNet 输入尺寸；GFPGAN 方框几何 |
 | **真实编译**（2026-10-29） | GitHub Actions 的 macOS runner：`xcodebuild test` 在 macOS 上编过并跑完 **113 格断言全绿**；同一套代码的 iOS Simulator 目标也构建成功（Xcode 16.4 + XcodeGen） |
-| 尚未做 | **未在 iPad 模拟器 / 真机上实际运行过**（CI 只做构建，不启动 App）。ORT 权重也没有在真机上跑过推导——CI 不下载 660MB 权重 |
+| 尚未做 | **未在真机上跑过**（模拟器不是 iPad：触摸压感、Apple Pencil、真 GPU 路径、系统权限弹窗都模拟不了）。ORT 权重也没有在真机上跑过推导——CI 不下载 660MB 权重 |
 
 > 首次真实编译暴露并修掉了 4 个问题，全是“没编译过就发现不了”的类型：
 > 缺 AppIcon 资产集（actool 直接 BUILD FAILED）、`TEST_HOST` 在 macOS 上解析成测试包
@@ -162,21 +163,28 @@ AI 资产：人像 α → 换底色/背景虚化；修复补丁（相对量）�
 
 ### CI（没有 Mac 时的验证路径）
 
-[.github/workflows/ci.yml](.github/workflows/ci.yml) 有两个 job：
+[.github/workflows/ci.yml](.github/workflows/ci.yml) 有三个 job：
 
 | job | 做什么 | 能抓到什么 |
 |---|---|---|
 | `macos-test` | 选 Xcode 16 → 装 XcodeGen → 校验模型清单 → 生成工程 → `xcodebuild test` | 全部 113 格断言；App 宿主测试的签名/`TEST_HOST` 问题 |
-| `ios-build` | 同一套生成流程 → 只构建 iOS Simulator | UIKit/AppKit 分支、iOS-only SwiftUI API、Info.plist 键 |
+| `ios-build` | 同一套生成流程 → 构建 iOS Simulator → 再把 113 格在模拟器上跑一遍 | UIKit/AppKit 分支、iOS-only SwiftUI API、Info.plist 键，以及 **`#if os(iOS)` 里那些 macOS 一行都执行不到的代码**（`PhotoLibraryWriter` / 相册写回）和 App 在 iOS 运行时上能否被拉起 |
+| `ios-unsigned-ipa` | Release 构建设备真机包 → 打成未签名 ipa | 只在推 main 或手动触发时跑；侧载人群用（见 [docs/device-check.md](docs/device-check.md) §1.5） |
 
-推上去后在 Actions 页面看 `macos-test` 的第一个红步：
+> 设备名不写死：runner 镜像里的模拟器随 Xcode 版本变，写死 `iPhone 15` 这种名字
+> 一旦不存在就会红成"Unable to find a device"，看起来像代码问题。`ios-build` 从
+> `xcrun simctl list -j` 挑一台现成 iPhone，挑不到就直接失败并把可用设备打出来。
+
+推上去后看第一个红步：
 
 - 失败在 **Generate project** → XcodeGen 版本或 `project.yml` 字段问题；
-- 失败在 **Test on macOS** 的编译阶段 → 先看 `ORTEngine.swift` 的绑定签名（升级 ORT 后最常见）；
-- 失败在 **Test on macOS** 的运行阶段 → 把 `macos-test-results` 里的 `.xcresult` 下载打开，断言名会直接指向几何/色彩/容器中的哪一条。
+- 失败在 **Test on macOS / Test on iOS Simulator** 的编译阶段 → 先看 `ORTEngine.swift` 的绑定签名（升级 ORT 后最常见）；
+- 只在 **Test on iOS Simulator** 红、macOS 绿 → 问题在 `#if os(iOS)` 分支或 iOS 运行时（宿主 App 拉起、权限、主线程），不是算法；
+- 失败在运行阶段 → 把 `macos-test-results` / `ios-test-results` 里的 `.xcresult` 下载打开，断言名会直接指向几何/色彩/容器中的哪一条。
 
 CI 已跑通（首次全绿：run [40809005087](https://github.com/tianjinfemto/imagecake-apple/actions/runs/40809005087)）。
-两个 job 并行，一轮约 2 分钟；失败时先看是哪一个 step 变红，再按下表分流。
+`macos-test` 与 `ios-build` 并行，加了模拟器测试后一轮约 5 分钟（冷启动模拟器占大头）；
+失败时先看是哪一个 step 变红，再按上表分流。
 
 ---
 
