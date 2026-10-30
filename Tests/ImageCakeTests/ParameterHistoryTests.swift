@@ -1,3 +1,4 @@
+import CoreGraphics
 import XCTest
 @testable import ImageCake
 
@@ -100,5 +101,41 @@ final class ParameterHistoryTests: XCTestCase {
         XCTAssertFalse(history.canUndo)
         XCTAssertFalse(history.canRedo)
         XCTAssertEqual(history.present, params(9))
+    }
+
+    // MARK: - 笔刷进历史
+
+    /// 参数没变、只多了一笔笔迹时也必须入栈。这条挂了的症状很阴：
+    /// 液化涂上去能看见，但撤销按下去“什么都没发生”。
+    func testBrushOnlyChangeStillEntersHistory() {
+        var stroke = LiquifyStroke()
+        stroke.from = CGPoint(x: 0.5, y: 0.5)
+        stroke.to = CGPoint(x: 0.6, y: 0.5)
+        var brush = BrushState()
+        brush.liquify = [stroke]
+
+        var history = ParameterHistory(initial: EditSnapshot(params: params(0)))
+        history.commit(EditSnapshot(params: params(0), brush: brush))
+        XCTAssertTrue(history.canUndo, "只改笔刷没入栈")
+
+        let restored = history.undo()
+        XCTAssertEqual(restored?.brush, BrushState(), "撤销后笔迹没消失")
+        XCTAssertEqual(restored?.params, params(0), "撤销不该动参数")
+
+        XCTAssertTrue(history.canRedo)
+        XCTAssertEqual(history.redo()?.brush, brush, "重做后笔迹没回来")
+    }
+
+    /// 改写栈顶不得新增历史。`resetParams` 靠它把栈顶的 params 换掉而不清笔刷；
+    /// 如果 amendPresent 自己也算一步，“复位调色”会在历史里多占一格。
+    func testAmendPresentDoesNotCreateAnEntry() {
+        var history = ParameterHistory(initial: EditSnapshot(params: params(0)))
+        history.amendPresent { $0.params = params(3) }
+        XCTAssertFalse(history.canUndo, "amendPresent 不该产生可撤销项")
+        XCTAssertEqual(history.present.params, params(3))
+
+        history.commit(EditSnapshot(params: params(4)))
+        XCTAssertEqual(history.past.count, 1)
+        XCTAssertEqual(history.past.first?.params, params(3))
     }
 }

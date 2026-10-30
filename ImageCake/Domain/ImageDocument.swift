@@ -4,12 +4,20 @@ import Foundation
 //
 // 分工：
 //   · tone 链是**纯参数**的（改滑杆就从 linear 重算一遍）；
+//   · 笔刷（液化/图章/保护）是**历史**的（一笔就是一条记录，不可重算只可重放）；
 //   · 人像 α 与修复补丁是**资产**（跑一次 AI 得到的，跨越参数变化复用）；
 //   · 抠图/修复都存"参考尺寸"：预览是降采样的，导出是全分辨率的，
 //     没有参考尺寸就只能靠当前画布猜，而猜错的表现是"遮罩整体错位"。
 //
 // 渲染顺序（与 imagecake 的链同序，只保留 v1 范围内可验证的阶段）：
-//   线性调色 → 显示域调色 → 修复补丁 → 换底色/背景虚化
+//   线性调色 → 显示域调色 → 空间滤波 → 液化 → 仿制图章 → 修复补丁 → 换底色/背景虚化
+//
+// 笔刷为什么夹在空间滤波之后、补丁之前：一条硬规则——**每个笔刷看到的
+// 画面，必须就是用户落笔那一刻在画面上看到的画面**。预览与导出都按同一
+// 次序重放，坐标才保证不漂（见 docs/parity.md §4）。推论是落笔顺序即渲染
+// 顺序：先框选再液化，补丁会落在液化后的位置上——因为用户确实是对着
+// 液化后的画面画的框。反过来（笔刷在调色之前）则不成立：调色后的像素
+// 已经变了，图章从「看不到的颜色」取样。
 
 struct ImageDocument: Sendable {
     /// 工作分辨率的线性图（预览档）。导出时由 ExportPipeline 重新载入全量。
@@ -27,6 +35,9 @@ struct ImageDocument: Sendable {
     /// 修复补丁（按 ref 尺寸存）。
     var patches: [InpaintPatch]
 
+    /// 笔刷类编辑（液化/图章/保护）。存笔迹不存栅格化结果，理由见 BrushState。
+    var brush: BrushState
+
     var canvasSize: PixelSize { linear.size }
     var hasPersonMask: Bool { personMask != nil }
 
@@ -40,11 +51,13 @@ struct ImageDocument: Sendable {
         self.personMask = nil
         self.maskReference = loaded.linear.size
         self.patches = []
+        self.brush = BrushState()
     }
 
     init(linear: LinearImage, originalSize: PixelSize, params: EditParameters,
          sourceURL: URL?, isRAW: Bool, loadNote: String,
-         personMask: MaskBuffer?, maskReference: PixelSize, patches: [InpaintPatch]) {
+         personMask: MaskBuffer?, maskReference: PixelSize, patches: [InpaintPatch],
+         brush: BrushState = BrushState()) {
         self.linear = linear
         self.originalSize = originalSize
         self.params = params
@@ -54,6 +67,7 @@ struct ImageDocument: Sendable {
         self.personMask = personMask
         self.maskReference = maskReference
         self.patches = patches
+        self.brush = brush
     }
 
     /// 预览/导出共用的一次渲染。返回显示码图（8bit 编码前）。
@@ -70,6 +84,20 @@ struct ImageDocument: Sendable {
             }
             if params.sharpen > 0 {
                 display = SpatialFilters.sharpen(display, strength: params.sharpen)
+            }
+        }
+
+        // 笔刷：液化先于图章。液化改变像素位置，图章按位置从当前画面取样——
+        // 反过来则图章搬进去的内容会被随后的位移场再次推走。
+        if !brush.liquify.isEmpty || !brush.stamps.isEmpty {
+            // 两个工具共用同一张保护掩码（保护笔刷对两者都成立，不该各涂一遍），
+            // 所以只按当前画布栅格化一次。
+            let protectionMask = brush.protectionMask(for: display.size)
+            if !brush.liquify.isEmpty {
+                display = LiquifyEngine.apply(display, strokes: brush.liquify, protection: protectionMask)
+            }
+            if !brush.stamps.isEmpty {
+                display = CloneStampEngine.apply(display, stamps: brush.stamps, protection: protectionMask)
             }
         }
 

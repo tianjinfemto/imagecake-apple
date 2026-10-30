@@ -60,9 +60,10 @@ final class EditorModel: ObservableObject {
     @Published private(set) var lastAIPath = ""
     @Published private(set) var lastAINote = ""
     @Published private(set) var exportNotes: [String] = []
-    /// 调色参数的撤销栈。只覆盖参数：AI 资产（α / 补丁）有自己的回退入口，
-    /// 把它们也存进历史会让内存按图数乘以几十 MB。
-    @Published private(set) var history = ParameterHistory()
+    /// 编辑历史的撤销栈。一格是 `EditSnapshot`（调色参数 + 笔迹）：
+    /// 「回到上一步」必须同时回到两边的状态，否则同一步操作先弹哪边
+    /// 没人猜得到。AI 资产（α / 补丁）不进历史，它们有自己的回退入口。
+    @Published private(set) var history = ParameterHistory<EditSnapshot>(initial: EditSnapshot())
     /// 模型文件变化时自增，逼模型面板重新读盘。
     @Published private(set) var modelRevision = 0
 
@@ -103,7 +104,7 @@ final class EditorModel: ObservableObject {
             // 的参数当作一次修改记进去）。
             historyTask?.cancel()
             historyTask = nil
-            history.reset(to: doc.params)
+            history.reset(to: EditSnapshot(doc))
             selection = nil
             selectionMode = false
             showMask = false
@@ -135,36 +136,96 @@ final class EditorModel: ObservableObject {
         scheduleHistoryCommit()
     }
 
+    // MARK: - 笔刷（液化 / 仿制图章 / 保护）
+    //
+    // 笔刷的入口在这里而不只在文档里，是为了让"一笔 = 一步历史"这件事
+    // 有一个确定的地方发生。滑杆需要 600ms 防抖是因为拖一下产生几十次
+    // 修改；一笔就是一笔，所以立即入栈，不防抖。
+    // 坐标全部归一化：手指/Apple Pencil 的位置由 CanvasView 换算后交给这里。
+
+    func addLiquifyStroke(_ stroke: LiquifyStroke) {
+        mutateDocument { $0.brush.liquify.append(stroke) }
+        commitHistoryNow()
+        scheduleRender()
+        status = "液化 \(document?.brush.liquify.count ?? 0) 笔"
+    }
+
+    func addCloneStamp(_ stamp: CloneStamp) {
+        mutateDocument { $0.brush.stamps.append(stamp) }
+        commitHistoryNow()
+        scheduleRender()
+        status = "图章 \(document?.brush.stamps.count ?? 0) 笔"
+    }
+
+    /// 涂一笔保护。半径落在 BrushStroke 自己的字段里，所以这里不再传。
+    func addProtectionStroke(_ stroke: BrushStroke) {
+        mutateDocument { $0.brush.protection.append(stroke) }
+        commitHistoryNow()
+        scheduleRender()
+        status = "保护 \(document?.brush.protection.count ?? 0) 笔"
+    }
+
+    /// 清掉某一类笔迹。不是撤销：撤销只退一步，而"把液化全擦了但保留图章"
+    /// 是独立意图，而且它能被断言（撤销栈那侧只保证入栈/出栈）。
+    func clearBrush(_ kind: BrushKind) {
+        guard var doc = document else { return }
+        switch kind {
+        case .liquify: doc.brush.liquify = []
+        case .stamps: doc.brush.stamps = []
+        case .protection: doc.brush.protection = []
+        case .all: doc.brush = BrushState()
+        }
+        document = doc
+        commitHistoryNow()
+        scheduleRender()
+        status = "已清除\(kind.title)"
+    }
+
+    enum BrushKind: CaseIterable {
+        case liquify, stamps, protection, all
+        var title: String {
+            switch self {
+            case .liquify: return "液化笔迹"
+            case .stamps: return "图章笔迹"
+            case .protection: return "保护笔刷"
+            case .all: return "全部笔刷"
+            }
+        }
+    }
+
     // MARK: - 撤销 / 重做
 
     var canUndo: Bool { history.canUndo }
     var canRedo: Bool { history.canRedo }
 
     /// 滑杆拖一下会产生几十次 updateParams。如果每次都入栈，一次拖动就占满
-    /// 整个历史；所以停手 600ms 后才记一步。
+    /// 整个历史；所以停手 600ms 后才记一步。快照在防抖到期时取，记住的是
+    /// 「停手那一刻的全部状态」——中间插入的笔刷（已立即入栈）会让两边
+    /// 相等，空操作不入栈，不会多占一格。
     private func scheduleHistoryCommit() {
         historyTask?.cancel()
         historyTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 600_000_000)
             guard !Task.isCancelled, let self, let doc = self.document else { return }
-            self.history.commit(doc.params)
+            self.history.commit(EditSnapshot(doc))
         }
     }
 
-    /// 原子操作（复位、载入预设）立即入栈，并把可能存在的防抖任务撤掉，
+    /// 原子操作（一笔笔刷、复位、载入预设）立即入栈，并把可能存在的防抖任务撤掉，
     /// 否则它会在 600ms 后用一个旧值盖掉刚记的那一步。
     private func commitHistoryNow() {
         historyTask?.cancel()
         historyTask = nil
         guard let doc = document else { return }
-        history.commit(doc.params)
+        history.commit(EditSnapshot(doc))
     }
 
     func undo() {
         historyTask?.cancel()
         historyTask = nil
         guard var doc = document, let restored = history.undo() else { return }
-        doc.params = restored
+        doc.params = restored.params
+        doc.brush = restored.brush
         document = doc
         scheduleRender()
         status = "已撤销"
@@ -174,7 +235,8 @@ final class EditorModel: ObservableObject {
         historyTask?.cancel()
         historyTask = nil
         guard var doc = document, let restored = history.redo() else { return }
-        doc.params = restored
+        doc.params = restored.params
+        doc.brush = restored.brush
         document = doc
         scheduleRender()
         status = "已重做"
@@ -184,9 +246,13 @@ final class EditorModel: ObservableObject {
         guard var doc = document else { return }
         doc.params = EditParameters()
         document = doc
-        commitHistoryNow()
+        // 只复位调色：笔刷不跟着清。“擦了笔刷”与“回到中性参数”是两件事，
+        // 前者在 clearBrush(.all)。栈里的一格是快照整体，所以先把栈顶的
+        // params 换掉再入栈，不把「复位」与下一步笔刷并成一步。
+        history.amendPresent { $0.params = EditParameters() }
+        history.commit(EditSnapshot(doc))
         scheduleRender()
-        status = "调色已复位（AI 资产保留）"
+        status = "调色已复位（笔刷与 AI 资产保留）"
     }
 
     // MARK: - 渲染
@@ -375,6 +441,7 @@ final class EditorModel: ObservableObject {
         guard var doc = document else { return }
         doc.params = params
         document = doc
+        // 预设只换调色参数，不碰笔刷（与 resetParams 同理）。
         commitHistoryNow()
         scheduleRender()
         var message = "已载入预设 \(sourceName)"

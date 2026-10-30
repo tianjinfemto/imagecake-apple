@@ -3,7 +3,12 @@ import Foundation
 // 导出流水线。
 //
 // 顺序是承诺，不是实现细节：
-//   全分辨率重载 → 调色 → 修复补丁 → 换底色 → 面部重绘 → AI 超清 → 尺寸档 → 编码
+//   全分辨率重载 → 调色 → 空间滤波 → 液化 → 仿制图章 → 修复补丁 → 换底色 → 面部重绘 → AI 超清 → 尺寸档 → 编码
+//
+// 预览与导出走同一个 `ImageDocument.render()`，所以笔刷不需要在这里出现：
+// 它们存的是归一化坐标 + 长边比例的半径，在全分辨率画布上重放就是正确位置。
+// 这也是笔刷不进补丁那类 `[..._scaled]` 备注的原因——补丁要缩放是因为它
+// 存的是像素矩形，而笔迹从来不存像素。
 //
 // 面部重绘与 AI 超清只在这里出现：两者都是秒级到分钟级，进预览会把
 // 滑杆变成幻灯片（imagecake 的同一结论）。超清必须最后一步——
@@ -81,7 +86,8 @@ enum ExportPipeline {
                                     loadNote: document.loadNote,
                                     personMask: document.personMask,
                                     maskReference: document.maskReference,
-                                    patches: document.patches)
+                                    patches: document.patches,
+                                    brush: document.brush)
         if working.patches.contains(where: { $0.reference != working.canvasSize }) {
             notes.append("[patch_scaled] 修复补丁按导出尺寸缩放（v1 未重跑网络）")
         }
