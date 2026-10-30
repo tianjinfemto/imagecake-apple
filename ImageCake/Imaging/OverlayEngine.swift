@@ -2,6 +2,11 @@ import CoreGraphics
 import CoreText
 import Foundation
 import ImageIO
+#if canImport(UIKit)
+import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 // 水印 / 边框 / 文字贴纸。
 //
@@ -101,7 +106,7 @@ enum OverlayEngine {
             context.restoreGState()
         }
 
-        let font = CTFontCreateWithNameAndSize(fontName as CFString, CGFloat(fontSize))
+        let font = CTFontCreateWithName(fontName as CFString, CGFloat(fontSize), nil)
         let textColor = CGColor(colorSpace: colorSpace, components: [
             CGFloat(color.r) / 255, CGFloat(color.g) / 255,
             CGFloat(color.b) / 255, CGFloat(color.a) / 255,
