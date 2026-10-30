@@ -111,6 +111,8 @@ struct EditorView: View {
                 Text("调色").tag(0)
                 Text("AI").tag(1)
                 Text("笔刷").tag(2)
+                Text("几何").tag(3)
+                Text("装饰").tag(4)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -121,7 +123,9 @@ struct EditorView: View {
                     switch tab {
                     case 0: TonePanel().environmentObject(model)
                     case 1: AIPanel().environmentObject(model)
-                    default: BrushPanel().environmentObject(model)
+                    case 2: BrushPanel().environmentObject(model)
+                    case 3: GeometryPanel().environmentObject(model)
+                    default: OverlayPanel().environmentObject(model)
                     }
                 }
                 .padding(.horizontal, 12)

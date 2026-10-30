@@ -38,6 +38,22 @@ struct ImageDocument: Sendable {
     /// 笔刷类编辑（液化/图章/保护）。存笔迹不存栅格化结果，理由见 BrushState。
     var brush: BrushState
 
+    /// 几何变换（旋转/翻转/裁剪）。不进预设：改画布尺寸，与调色参数不同生命周期。
+    var geometry: GeometryTransform = .identity
+
+    /// 水印/边框/文字贴纸。只挂导出，不进预览管线。
+    var overlays: [OverlayElement] = []
+
+    /// 本地调节（选区内调色）。复用笔迹底座做选区掩码。
+    var localAdjustments: [LocalAdjustment] = []
+
+    /// 修补笔迹（同图取样修复，与 LaMa 互补）。
+    var patchStrokes: [PatchStroke] = []
+
+    /// 老照片修复开关。
+    var oldPhotoRestore: Bool = false
+    var oldPhotoScratchThreshold: Double = 0.15
+
     var canvasSize: PixelSize { linear.size }
     var hasPersonMask: Bool { personMask != nil }
 
@@ -72,7 +88,24 @@ struct ImageDocument: Sendable {
 
     /// 预览/导出共用的一次渲染。返回显示码图（8bit 编码前）。
     func render(applyMask: Bool = true) -> DisplayImage {
-        var display = ToneEngine.render(linear, params: params)
+        var workingLinear = linear
+
+        // 0. 老照片修复：褪色恢复 + 划痕去除。在调色之前——它改的是输入
+        //    本身的化学褪变，不是创意调色。先修后调，调色才不会把褪色
+        //    当成"有意为之"再去抵消。
+        if oldPhotoRestore {
+            let display = ToneEngine.render(workingLinear, params: EditParameters())
+            let restored = OldPhotoEngine.restore(display, scratchThreshold: oldPhotoScratchThreshold)
+            workingLinear = restored.0.toLinear()
+        }
+
+        var display = ToneEngine.render(workingLinear, params: params)
+
+        // 本地调节：在全局调色之后、空间滤波之前。选区内再叠一层调色，
+        // 选区外不动。复用笔迹底座做掩码，与保护笔刷同构。
+        if !localAdjustments.isEmpty {
+            display = LocalAdjustmentEngine.apply(display, adjustments: localAdjustments, linear: workingLinear)
+        }
 
         // 空间滤波：先降噪再锐化（反过来等于先把噪声锐化一遍）。
         // 放在补丁合成**之前**：补丁是 AI 的输出（本身干净而锐利），
@@ -99,6 +132,12 @@ struct ImageDocument: Sendable {
             if !brush.stamps.isEmpty {
                 display = CloneStampEngine.apply(display, stamps: brush.stamps, protection: protectionMask)
             }
+        }
+
+        // 修补笔迹（同图取样）：在图章之后、补丁之前。图章和修补都是
+        // 从当前画面取样，但修补是固定偏移量，图章是动态锚点。
+        if !patchStrokes.isEmpty {
+            display = PatchEngine.apply(display, strokes: patchStrokes)
         }
 
         // 修复补丁：只在尺寸对得上时按相对量贴回去。

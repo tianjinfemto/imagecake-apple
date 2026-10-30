@@ -33,6 +33,10 @@ struct AIPanel: View {
             personSection
             backgroundSection
             inpaintSection
+            landmarksSection
+            poseSection
+            attrSection
+            oldPhotoSection
             exportAISection
         }
     }
@@ -182,6 +186,90 @@ struct AIPanel: View {
                 .font(.system(size: 10))
                 .foregroundStyle(Tokens.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    // MARK: - 关键点
+
+    private var landmarksSection: some View {
+        SectionCard(title: "人脸关键点", subtitle: model.faceLandmarksResult?.landmarks.count == 0 ? nil : "\(model.faceLandmarksResult?.landmarks.count ?? 0) 张脸") {
+            Button {
+                Task { await model.runLandmarks() }
+            } label: {
+                Label("检测 478 点关键点", systemImage: "face.dashed")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .disabled(model.document == nil)
+            if let result = model.faceLandmarksResult, !result.report.note.isEmpty {
+                Text(result.report.note)
+                    .font(.system(size: 10))
+                    .foregroundStyle(result.report.ok ? Tokens.textSecondary : Tokens.danger)
+            }
+        }
+    }
+
+    // MARK: - 身形
+
+    private var poseSection: some View {
+        SectionCard(title: "身形检测", subtitle: model.bodyPoseResult?.joints.isEmpty == false ? "\(model.bodyPoseResult?.joints.count ?? 0) 点" : nil) {
+            Button {
+                Task { await model.runBodyPose() }
+            } label: {
+                Label("检测 17 点身形", systemImage: "figure.dance")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .disabled(model.document == nil)
+            if let result = model.bodyPoseResult, !result.report.note.isEmpty {
+                Text(result.report.note)
+                    .font(.system(size: 10))
+                    .foregroundStyle(result.report.ok ? Tokens.textSecondary : Tokens.danger)
+            }
+            Text("需先抠图获取人像区域。美体液化按关节点驱动。")
+                .font(.system(size: 10))
+                .foregroundStyle(Tokens.textSecondary)
+        }
+    }
+
+    // MARK: - 年龄 / 性别
+
+    private var attrSection: some View {
+        SectionCard(title: "年龄 / 性别", subtitle: model.faceAttrResult?.attrs.isEmpty == false ? "\(model.faceAttrResult?.attrs.count ?? 0) 张脸" : nil) {
+            Button {
+                Task { await model.runFaceAttr() }
+            } label: {
+                Label("识别属性", systemImage: "person.text.rectangle")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .disabled(model.document == nil)
+            if let result = model.faceAttrResult, !result.attrs.isEmpty {
+                ForEach(Array(result.attrs.enumerated()), id: \.offset) { _, attr in
+                    Text("脸 \(attr.faceBox.midX.formatted()) : \(attr.age) 岁 · \(attr.gender)")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Tokens.textSecondary)
+                }
+            }
+        }
+    }
+
+    // MARK: - 老照片修复
+
+    private var oldPhotoSection: some View {
+        SectionCard(title: "老照片修复", subtitle: model.document?.oldPhotoRestore == true ? "已开" : "已关") {
+            Button {
+                model.toggleOldPhoto()
+            } label: {
+                Label(model.document?.oldPhotoRestore == true ? "关闭修复" : "开启修复",
+                      systemImage: "wand.and.stars")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .tint(model.document?.oldPhotoRestore == true ? Tokens.accent : nil)
+            Text("褪色恢复（灰世界白平衡）+ 划痕去除（形态学开运算）。零权重、确定性。")
+                .font(.system(size: 10))
+                .foregroundStyle(Tokens.textSecondary)
         }
     }
 

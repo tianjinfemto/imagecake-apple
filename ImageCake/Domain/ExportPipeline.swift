@@ -88,6 +88,12 @@ enum ExportPipeline {
                                     maskReference: document.maskReference,
                                     patches: document.patches,
                                     brush: document.brush)
+        working.geometry = document.geometry
+        working.overlays = document.overlays
+        working.localAdjustments = document.localAdjustments
+        working.patchStrokes = document.patchStrokes
+        working.oldPhotoRestore = document.oldPhotoRestore
+        working.oldPhotoScratchThreshold = document.oldPhotoScratchThreshold
         if working.patches.contains(where: { $0.reference != working.canvasSize }) {
             notes.append("[patch_scaled] 修复补丁按导出尺寸缩放（v1 未重跑网络）")
         }
@@ -122,6 +128,12 @@ enum ExportPipeline {
             } else {
                 notes.append(result.report.note)
             }
+        }
+
+        // 水印/边框/文字贴纸：导出最后一步（AI 之后、编码之前）。
+        // 不进预览管线——预览看修图效果，不看装饰。
+        if !working.overlays.isEmpty {
+            bytes = OverlayEngine.apply(bytes, elements: working.overlays)
         }
 
         if let rebuilt = DisplayImage(displayRGBA8: bytes) {

@@ -19,6 +19,9 @@ final class EditorModel: ObservableObject {
         case exporting(String)
         case savingToPhotos
         case model(String)
+        case landmarks
+        case bodyPose
+        case faceAttr
 
         var title: String {
             switch self {
@@ -28,6 +31,9 @@ final class EditorModel: ObservableObject {
             case .exporting(let name): return "正在导出 \(name)"
             case .savingToPhotos: return "正在写入相册"
             case .model(let name): return "正在处理 \(name)"
+            case .landmarks: return "正在检测关键点"
+            case .bodyPose: return "正在检测身形"
+            case .faceAttr: return "正在识别属性"
             }
         }
 
@@ -39,6 +45,9 @@ final class EditorModel: ObservableObject {
             case .exporting: return "全分辨率重算 + 面部重绘/超清可能是分钟级；请保持 App 在前台（iPadOS 会挂起后台任务）"
             case .savingToPhotos: return "字节直接交给照片库，不重新编码；首次会弹一次授权框"
             case .model: return "下载后会做字节数与 SHA-256 双重校验"
+            case .landmarks: return "478 点关键点，每张脸约 0.2 秒"
+            case .bodyPose: return "RTMPose 17 点，需先抠图获取人像区域"
+            case .faceAttr: return "年龄 + 性别分类，每张脸跑两颗网络"
             }
         }
     }
@@ -81,6 +90,9 @@ final class EditorModel: ObservableObject {
     @Published private(set) var lastAIPath = ""
     @Published private(set) var lastAINote = ""
     @Published private(set) var exportNotes: [String] = []
+    @Published private(set) var faceLandmarksResult: FaceLandmarksResult?
+    @Published private(set) var bodyPoseResult: BodyPoseResult?
+    @Published private(set) var faceAttrResult: FaceAttrResult?
     /// 编辑历史的撤销栈。一格是 `EditSnapshot`（调色参数 + 笔迹）：
     /// 「回到上一步」必须同时回到两边的状态，否则同一步操作先弹哪边
     /// 没人猜得到。AI 资产（α / 补丁）不进历史，它们有自己的回退入口。
@@ -436,6 +448,184 @@ final class EditorModel: ObservableObject {
         document = doc
         scheduleRender()
         status = "已清除全部消除补丁"
+    }
+
+    // MARK: - AI：关键点 / 身形 / 属性
+
+    func runLandmarks() async {
+        guard let doc = document else { return }
+        busy = .landmarks
+        defer { busy = nil }
+        let bytes = await Task.detached(priority: .userInitiated) {
+            doc.render(applyMask: false).rgba8()
+        }.value
+        let result = await FaceLandmarksTask.run(display: bytes, store: store, ort: ort)
+        faceLandmarksResult = result
+        lastAINote = result.report.note
+        if !result.report.ok { alert = result.report.note }
+        status = result.report.ok ? "关键点：\(result.landmarks.count) 张脸 · \(Int(result.report.elapsedMs))ms" : result.report.note
+    }
+
+    func runBodyPose() async {
+        guard let doc = document else { return }
+        busy = .bodyPose
+        defer { busy = nil }
+        let bytes = await Task.detached(priority: .userInitiated) {
+            doc.render(applyMask: false).rgba8()
+        }.value
+        let result = await BodyPoseTask.run(display: bytes, personMask: doc.personMask, store: store, ort: ort)
+        bodyPoseResult = result
+        lastAINote = result.report.note
+        if !result.report.ok { alert = result.report.note }
+        status = result.report.ok ? "身形：\(result.joints.count) 点 · \(Int(result.report.elapsedMs))ms" : result.report.note
+    }
+
+    func runFaceAttr() async {
+        guard let doc = document else { return }
+        busy = .faceAttr
+        defer { busy = nil }
+        let bytes = await Task.detached(priority: .userInitiated) {
+            doc.render(applyMask: false).rgba8()
+        }.value
+        let result = await FaceAttrTask.run(display: bytes, store: store, ort: ort)
+        faceAttrResult = result
+        lastAINote = result.report.note
+        if !result.report.ok { alert = result.report.note }
+        status = result.report.ok ? "属性：\(result.attrs.count) 张脸 · \(Int(result.report.elapsedMs))ms" : result.report.note
+    }
+
+    // MARK: - 几何变换
+
+    func rotate90(clockwise: Bool) {
+        mutateDocument { doc in
+            doc.geometry.rotation += clockwise ? 90 : -90
+        }
+        scheduleRender()
+        status = "旋转 \(clockwise ? "右" : "左") 90°"
+    }
+
+    func flip(horizontal: Bool) {
+        mutateDocument { doc in
+            if horizontal { doc.geometry.flipHorizontal.toggle() }
+            else { doc.geometry.flipVertical.toggle() }
+        }
+        scheduleRender()
+        status = horizontal ? "水平翻转" : "垂直翻转"
+    }
+
+    func crop(to normalizedRect: CGRect) {
+        mutateDocument { doc in
+            doc.geometry.cropRect = normalizedRect
+        }
+        scheduleRender()
+        status = "裁剪已设"
+    }
+
+    func resetGeometry() {
+        mutateDocument { doc in
+            doc.geometry = .identity
+        }
+        scheduleRender()
+        status = "几何已复位"
+    }
+
+    // MARK: - 智能构图
+
+    func suggestSmartCrop() async {
+        guard let doc = document else { return }
+        let bytes = await Task.detached(priority: .userInitiated) {
+            doc.render(applyMask: false).rgba8()
+        }.value
+        let landmarks = faceLandmarksResult?.landmarks ?? []
+        if landmarks.isEmpty {
+            let result = await FaceLandmarksTask.run(display: bytes, store: store, ort: ort)
+            faceLandmarksResult = result
+            if let suggestion = SmartCropEngine.suggest(imageSize: bytes.size, landmarks: result.landmarks, personMask: doc.personMask) {
+                crop(to: suggestion.cropRect)
+                status = "智能构图：\(suggestion.reason)"
+            } else {
+                status = "无法建议构图：未检测到主体"
+            }
+        } else {
+            if let suggestion = SmartCropEngine.suggest(imageSize: bytes.size, landmarks: landmarks, personMask: doc.personMask) {
+                crop(to: suggestion.cropRect)
+                status = "智能构图：\(suggestion.reason)"
+            }
+        }
+    }
+
+    // MARK: - 老照片修复
+
+    func toggleOldPhoto() {
+        mutateDocument { doc in
+            doc.oldPhotoRestore.toggle()
+        }
+        scheduleRender()
+        status = document?.oldPhotoRestore == true ? "老照片修复已开" : "老照片修复已关"
+    }
+
+    // MARK: - 修补工具
+
+    func addPatchStroke(_ stroke: PatchStroke) {
+        mutateDocument { $0.patchStrokes.append(stroke) }
+        commitHistoryNow()
+        scheduleRender()
+        status = "修补 \(document?.patchStrokes.count ?? 0) 笔"
+    }
+
+    func clearPatchStrokes() {
+        mutateDocument { $0.patchStrokes = [] }
+        commitHistoryNow()
+        scheduleRender()
+        status = "已清除修补笔迹"
+    }
+
+    // MARK: - 本地调节
+
+    func addLocalAdjustment(_ adjustment: LocalAdjustment) {
+        mutateDocument { $0.localAdjustments.append(adjustment) }
+        commitHistoryNow()
+        scheduleRender()
+        status = "本地调节 \(document?.localAdjustments.count ?? 0) 个"
+    }
+
+    func clearLocalAdjustments() {
+        mutateDocument { $0.localAdjustments = [] }
+        commitHistoryNow()
+        scheduleRender()
+        status = "已清除本地调节"
+    }
+
+    // MARK: - 水印 / 边框 / 文字
+
+    func addOverlay(_ element: OverlayElement) {
+        mutateDocument { $0.overlays.append(element) }
+        scheduleRender()
+        status = "已添加装饰元素"
+    }
+
+    func removeOverlay(id: UUID) {
+        mutateDocument { $0.overlays.removeAll { $0.id == id } }
+        scheduleRender()
+        status = "已移除装饰元素"
+    }
+
+    func clearOverlays() {
+        mutateDocument { $0.overlays = [] }
+        scheduleRender()
+        status = "已清除所有装饰"
+    }
+
+    // MARK: - XMP 导入
+
+    func importXMP(_ xmp: String) {
+        guard var doc = document else { return }
+        let (params, unknown) = XMPImporter.import_(xmp, into: doc.params)
+        doc.params = params
+        document = doc
+        scheduleRender()
+        scheduleHistoryCommit()
+        status = unknown.isEmpty ? "XMP 已导入" : "XMP 已导入，\(unknown.count) 个未知键已跳过"
     }
 
     // MARK: - 导出

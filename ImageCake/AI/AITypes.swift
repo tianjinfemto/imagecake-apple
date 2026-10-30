@@ -130,6 +130,41 @@ struct FaceRestoreResult: Sendable {
     var report: AIReport
 }
 
+// MARK: - 关键点与属性
+
+struct FaceLandmarks: Sendable {
+    var faceBox: PixelRect
+    /// 像素坐标点（478 个），空 = 网络没出结果。
+    var points: [CGPoint]
+    var eyeOpenRatio: Double
+}
+
+struct FaceLandmarksResult: Sendable {
+    var landmarks: [FaceLandmarks]
+    var report: AIReport
+}
+
+struct BodyJoint: Sendable {
+    var name: String
+    var position: CGPoint
+}
+
+struct BodyPoseResult: Sendable {
+    var joints: [BodyJoint]
+    var report: AIReport
+}
+
+struct FaceAttr: Sendable {
+    var faceBox: PixelRect
+    var age: String
+    var gender: String
+}
+
+struct FaceAttrResult: Sendable {
+    var attrs: [FaceAttr]
+    var report: AIReport
+}
+
 /// 一块可复用的修复成果（与 imagecake 的 InpaintPatch 同构）。
 ///
 /// 为什么不缓存"合成好的整张图"：用户接着拖曝光时，旧补丁要能贴到新的
