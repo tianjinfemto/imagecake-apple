@@ -40,7 +40,12 @@ struct CloneStamp: Equatable {
 
 enum CloneStampEngine {
     /// 依次应用若干次仿制。掩码外的像素必须逐字节不动。
-    static func apply(_ image: DisplayImage, stamps: [CloneStamp]) -> DisplayImage {
+    ///
+    /// `protection` 是保护笔刷的权重图（255 = 完全保护），乘在混合强度上：
+    /// 被保护的区域不会被覆盖，而不是「盖完再贴回去」（那样边缘会断层）。
+    static func apply(_ image: DisplayImage,
+                      stamps: [CloneStamp],
+                      protection: MaskBuffer? = nil) -> DisplayImage {
         guard !stamps.isEmpty, image.size.pixelCount > 0 else { return image }
 
         let size = image.size
@@ -49,6 +54,13 @@ enum CloneStampEngine {
         // 源固定为输入：多笔之间不互相污染。
         let source = image.pixels
         var output = source
+
+        let protectionBytes: [UInt8]? = {
+            guard let mask = protection else { return nil }
+            let resized = mask.resized(to: size)
+            guard !resized.isEmpty else { return nil }
+            return [UInt8](resized.data)
+        }()
 
         for stamp in stamps {
             guard !stamp.points.isEmpty else { continue }
@@ -83,13 +95,22 @@ enum CloneStampEngine {
                                     let index = row + x
                                     let weight = Int(weights[index])
                                     guard weight > 0 else { continue }
+                                    // 255 = 完全保护 → k 归零，这个像素不动。
+                                    // 这里不用 `protectionBytes.map{...} ?? 1`：那样
+                                    // protect 是 Float?，`protect > 0` 会撞上 Optional
+                                    // 的 ambiguous 重载，报错信息还指向别处。
+                                    var protect = Float(1)
+                                    if let protectionBytes {
+                                        protect = 1 - Float(protectionBytes[index]) / 255
+                                        guard protect > 0 else { continue }
+                                    }
 
                                     ImageSampling.bilinear(src: src, width: width, height: height,
                                                            x: Double(x) + shiftX,
                                                            y: Double(y) + shiftY,
                                                            into: tmp, at: 0)
 
-                                    let k = Float(weight) / 255 * strength
+                                    let k = Float(weight) / 255 * strength * protect
                                     let offset = index * 4
                                     for channel in 0 ..< 4 {
                                         dst[offset + channel] = dst[offset + channel] * (1 - k) + tmp[channel] * k

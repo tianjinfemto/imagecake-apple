@@ -90,4 +90,21 @@ final class CloneStampEngineTests: XCTestCase {
             XCTAssertGreaterThan(red(out, x: x, y: 8), 0.9, "x=\(x) 处没被填上")
         }
     }
+
+    /// 保护笔刷：掩码 255 的区域必须一个字节都不动。
+    func testFullProtectionBlocksTheStamp() {
+        let image = halfSplit()
+        let protected = MaskBuffer.filled(size, value: 255)
+        let out = CloneStampEngine.apply(image, stamps: [stamp()], protection: protected)
+        XCTAssertEqual(out.pixels, image.pixels)
+    }
+
+    /// 掩码全 0 应当等价于没传保护——否则「用了保护笔刷但没涂」也会失效。
+    func testZeroProtectionBehavesLikeNone() {
+        let image = halfSplit()
+        let unprotected = MaskBuffer.filled(size, value: 0)
+        let withZero = CloneStampEngine.apply(image, stamps: [stamp()], protection: unprotected)
+        let without = CloneStampEngine.apply(image, stamps: [stamp()])
+        XCTAssertEqual(withZero.pixels, without.pixels)
+    }
 }

@@ -115,4 +115,25 @@ final class LiquifyEngineTests: XCTestCase {
             XCTAssertLessThanOrEqual(out.pixels[index], 1, "采到了画布外的值")
         }
     }
+
+    /// 保护笔刷：掩码 255 的区域不能被推动，整张图逐像素不变。
+    func testFullProtectionBlocksThePush() {
+        let image = gradient()
+        let protected = MaskBuffer.filled(size, value: 255)
+        let stroke = LiquifyStroke(from: CGPoint(x: 0.5, y: 0.5), to: CGPoint(x: 0.6, y: 0.5),
+                                   radius: 0.3, strength: 1)
+        let out = LiquifyEngine.apply(image, strokes: [stroke], protection: protected)
+        XCTAssertEqual(out.pixels, image.pixels)
+    }
+
+    /// 掩码全 0 应当等价于没传保护。
+    func testZeroProtectionBehavesLikeNone() {
+        let image = gradient()
+        let unprotected = MaskBuffer.filled(size, value: 0)
+        let stroke = LiquifyStroke(from: CGPoint(x: 0.5, y: 0.5), to: CGPoint(x: 0.6, y: 0.5),
+                                   radius: 0.3, strength: 1)
+        let withZero = LiquifyEngine.apply(image, strokes: [stroke], protection: unprotected)
+        let without = LiquifyEngine.apply(image, strokes: [stroke])
+        XCTAssertEqual(withZero.pixels, without.pixels)
+    }
 }

@@ -34,11 +34,23 @@ struct LiquifyStroke: Equatable {
 enum LiquifyEngine {
     /// 把若干次拖动叠加成一次重采样。多次拖动先累加位移场再采样一次：
     /// 每笔都重采样一遍会让图被插值糊上很多次，视觉上「越涂越软」。
-    static func apply(_ image: DisplayImage, strokes: [LiquifyStroke]) -> DisplayImage {
+    ///
+    /// `protection` 是保护笔刷的权重图（255 = 完全保护）。它乘在位移权重上，
+    /// 所以被保护的区域不会被推动——而不是「推完再贴回去」，那样边缘会断层。
+    static func apply(_ image: DisplayImage,
+                      strokes: [LiquifyStroke],
+                      protection: MaskBuffer? = nil) -> DisplayImage {
         guard !strokes.isEmpty, image.size.pixelCount > 0 else { return image }
         let width = image.size.width
         let height = image.size.height
         let longEdge = Double(image.size.longEdge)
+
+        let protectionBytes: [UInt8]? = {
+            guard let mask = protection else { return nil }
+            let resized = mask.resized(to: image.size)
+            guard !resized.isEmpty else { return nil }
+            return [UInt8](resized.data)
+        }()
 
         // 反向位移场（像素单位）。
         var offsetX = [Float](repeating: 0, count: width * height)
@@ -69,8 +81,13 @@ enum LiquifyEngine {
                     let distance = (dx * dx + dy * dy).squareRoot()
                     guard distance < radius else { continue }
                     let t = distance / radius
-                    let weight = (1 - t * t) * strength
                     let index = row + x
+                    var weight = (1 - t * t) * strength
+                    if let protectionBytes {
+                        // 255 = 完全保护 → 乘 0；0 = 不保护 → 乘 1。
+                        weight *= 1 - Double(protectionBytes[index]) / 255
+                    }
+                    guard weight > 0 else { continue }
                     offsetX[index] -= Float(deltaX * weight)
                     offsetY[index] -= Float(deltaY * weight)
                 }
