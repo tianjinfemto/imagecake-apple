@@ -89,9 +89,9 @@ enum LiquifyEngine {
                                 let index = y * width + x
                                 let sampleX = Double(x) + Double(shiftX[index])
                                 let sampleY = Double(y) + Double(shiftY[index])
-                                sampleBilinear(src: src, width: width, height: height,
-                                               x: sampleX, y: sampleY,
-                                               into: dst, at: index * 4)
+                                ImageSampling.bilinear(src: src, width: width, height: height,
+                                                       x: sampleX, y: sampleY,
+                                                       into: dst, at: index * 4)
                             }
                         }
                     }
@@ -100,33 +100,5 @@ enum LiquifyEngine {
         }
 
         return DisplayImage(size: image.size, pixels: output)
-    }
-
-    /// 双线性采样。超出边界按 clamp 处理——液化不该把画布外的黑色拖进来。
-    private static func sampleBilinear(src: UnsafeBufferPointer<Float>,
-                                       width: Int, height: Int,
-                                       x: Double, y: Double,
-                                       into dst: UnsafeMutableBufferPointer<Float>,
-                                       at offset: Int) {
-        let x0 = Int(x.rounded(.down))
-        let y0 = Int(y.rounded(.down))
-        let fx = Float(x - Double(x0))
-        let fy = Float(y - Double(y0))
-
-        let left = min(max(x0, 0), width - 1)
-        let right = min(max(x0 + 1, 0), width - 1)
-        let top = min(max(y0, 0), height - 1)
-        let bottom = min(max(y0 + 1, 0), height - 1)
-
-        let topLeft = (top * width + left) * 4
-        let topRight = (top * width + right) * 4
-        let bottomLeft = (bottom * width + left) * 4
-        let bottomRight = (bottom * width + right) * 4
-
-        for channel in 0 ..< 4 {
-            let a = src[topLeft + channel] + (src[topRight + channel] - src[topLeft + channel]) * fx
-            let b = src[bottomLeft + channel] + (src[bottomRight + channel] - src[bottomLeft + channel]) * fx
-            dst[offset + channel] = a + (b - a) * fy
-        }
     }
 }
