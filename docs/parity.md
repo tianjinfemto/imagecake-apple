@@ -28,7 +28,7 @@
 | 背景虚化 | ✅ | 三次盒式模糊近似高斯；半径随长边缩放 |
 | 智能消除（LaMa） | ✅ | 以选区为中心取 512 正方形窗口；**大选区不做多窗 tiling**（v1 已知降级） |
 | 修补工具 / 祛路人 | ⛔ | 同图取样打分那套未移植；LaMa 路线已能覆盖"去掉小物件" |
-| 仿制图章 / 液化 / 保护笔刷 | 🟡 | 三个工具从算子到渲染**都已接通**：`BrushState` 存笔迹（归一化坐标 + 长边比例半径，所以预览与全分辨率导出重放同一个位置）→ `ImageDocument.render()` 在空间滤波之后、补丁之前依次重放 `LiquifyEngine`、`CloneStampEngine`，两者共用一张 `protection` 掩码；笔迹同时已进 `EditSnapshot` 撤销栈。**缺画布手势与 UI 面板入口**（`EditorModel` 已有 `addLiquifyStroke` / `addCloneStamp` / `addProtectionStroke` / `clearBrush`，但没人在画布上调用它们） |
+| 仿制图章 / 液化 / 保护笔刷 | ✅ | 三个工具从算子到渲染到**画布手势**全链路接通：`BrushState` 存笔迹（归一化坐标 + 长边比例半径，所以预览与全分辨率导出重放同一个位置）→ `ImageDocument.render()` 在空间滤波之后、补丁之前依次重放 `LiquifyEngine`、`CloneStampEngine`，两者共用一张 `protection` 掩码；笔迹同时已进 `EditSnapshot` 撤销栈。画布侧 `CanvasView` 按 `EditorModel.brushTool` 切换单指拖行为：液化记 from→to、保护/图章采样笔迹点（`StrokeSampler` 按半径一半间距过滤，与 `StrokeRasterizer` 内部插值步长对齐）；图章先在面板开取样模式、点画布设锚点再绘制。`BrushPanel` 提供工具选择、半径/强度/硬度、清除入口 |
 | 面部重绘（GFPGAN） | ✅ | 512 定宽、1/255、输出自夹取、椭圆羽化、闭眼不改只点名 |
 | AI 超清（ESRGAN x4v3） | ✅ | 互不重叠内部块 + 每块加一圈上下文（不维护浮点权重累加器）；2x 由 4x 降采样 |
 | 面部关键点 478 / 五官形变 | ⛔ | 权重在清单里，任务未接线 |
@@ -58,7 +58,7 @@
 
 | imagecake | 本仓 |
 |---|---|
-| 1000+ C++ 断言（Catch2 风格自研） | 121 格 XCTest（几何/色彩/色轮与 HSL/色轮坐标/画布视口/空间滤波/补光与高光/文件名模板/去色边/撤销栈与笔迹入栈/笔迹栅格化/液化/仿制图章/保护笔刷/**文档级渲染管线与跨分辨率重放**/容器/预设契约） |
+| 1000+ C++ 断言（Catch2 风格自研） | 129 格 XCTest（几何/色彩/色轮与 HSL/色轮坐标/画布视口/空间滤波/补光与高光/文件名模板/去色边/撤销栈与笔迹入栈/笔迹栅格化/液化/仿制图章/保护笔刷/**文档级渲染管线与跨分辨率重放**/**笔刷手势采样**/容器/预设契约） |
 | 无头 CLI 回归 | 无（v1 不做 CLI） |
 | 权重清单 + 双校验 | ✅ 同一份 `models.json`，脚本与 App 共用 |
 | 缺件点名令牌 | ✅ `[no_model:file]` / `[fallback:vision]` / `[closed_eyes]` / `[too_large]` / `[patch_scaled]` |

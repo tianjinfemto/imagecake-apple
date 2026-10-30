@@ -56,6 +56,27 @@ final class EditorModel: ObservableObject {
     /// 画布上的框选（归一化，y 向下）。
     @Published var selection: CGRect?
     @Published var selectionEnabled = true
+    /// 当前笔刷工具。.none 时画布单指拖走框选；否则走笔刷落笔。
+    @Published var brushTool: BrushTool = .none {
+        didSet {
+            // 换工具时清掉图章取样点与取样模式：不同工具的取样语义不同，
+            // 留着旧锚点会让用户以为「换回来还能接着画」而画到错位置。
+            if brushTool != .cloneStamp {
+                cloneSource = nil
+                clonePickingMode = false
+            }
+        }
+    }
+    /// 笔刷半径（归一化，相对长边）。与 BrushStroke.radius 同口径。
+    @Published var brushRadius: Double = 0.04
+    /// 笔刷强度 0...1，液化与图章共用。
+    @Published var brushStrength: Double = 0.8
+    /// 笔刷硬度 0...1，透传给栅格化。
+    @Published var brushHardness: Double = 0.6
+    /// 仿制图章的取样锚点（归一化）。nil = 尚未取样。
+    @Published private(set) var cloneSource: CGPoint?
+    /// 取样模式：开了之后下一次点画布设 cloneSource，设完自动关。
+    @Published var clonePickingMode = false
     /// 最近一次 AI 任务的路径与 note（面板直接显示）。
     @Published private(set) var lastAIPath = ""
     @Published private(set) var lastAINote = ""
@@ -191,6 +212,42 @@ final class EditorModel: ObservableObject {
             case .all: return "全部笔刷"
             }
         }
+    }
+
+    /// 画布上的当前工具。.none 时单指拖走框选（智能消除用），
+    /// 其余三个走各自的笔刷落笔。
+    enum BrushTool: CaseIterable {
+        case none, liquify, cloneStamp, protection
+        var title: String {
+            switch self {
+            case .none: return "无"
+            case .liquify: return "液化"
+            case .cloneStamp: return "图章"
+            case .protection: return "保护"
+            }
+        }
+        var icon: String {
+            switch self {
+            case .none: return "hand.point.up.left"
+            case .liquify: return "arrow.left.and.right"
+            case .cloneStamp: return "stamp"
+            case .protection: return "shield"
+            }
+        }
+    }
+
+    // MARK: - 仿制图章取样
+
+    /// 在画布上设取样锚点（归一化坐标）。由 CanvasView 在取样模式下调用。
+    func setCloneSource(_ point: CGPoint) {
+        cloneSource = point
+        clonePickingMode = false
+        status = "图章取样点已设：(\(String(format: "%.3f", point.x)), \(String(format: "%.3f", point.y)))"
+    }
+
+    func clearCloneSource() {
+        cloneSource = nil
+        clonePickingMode = false
     }
 
     // MARK: - 撤销 / 重做

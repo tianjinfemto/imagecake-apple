@@ -2,7 +2,7 @@
 #
 # 为什么需要它：开发机是 Windows，没有 xcodebuild/Swift；这份工作流是
 # "能不能编译"的最短验证路径。job 分工明确——
-#   · macos-test：App 宿主式单测（121 格），验证几何/色彩/容器/预设契约；
+#   · macos-test：App 宿主式单测（129 格），验证几何/色彩/容器/预设契约；
 #   · ios-build：先构建 iOS Simulator 目标抓平台特有的编译错误
 #     （UIKit/AppKit 分支、Info.plist 键、SwiftUI 的 iOS-only API），
 #     再在同一个 job 里把同一批断言在模拟器上真跑一遍；
@@ -117,7 +117,7 @@ jobs:
             build
 
       - name: Test on iOS Simulator
-        # 为什么要在 iOS 上再跑一遍同名断言：macOS 那 121 格碰不到 `#if os(iOS)` 的
+        # 为什么要在 iOS 上再跑一遍同名断言：macOS 那 129 格碰不到 `#if os(iOS)` 的
         # 代码（PhotoLibraryWriter、相册写回），而 iPad 才是 v1 的主目标——
         # 「编得过」不等于「在 iOS 运行时上起得来」。
         #

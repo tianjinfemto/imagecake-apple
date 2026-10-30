@@ -97,11 +97,7 @@ struct EditorView: View {
     @ViewBuilder
     private var canvasArea: some View {
         if model.hasImage {
-            CanvasView(image: model.preview,
-                       maskOverlay: model.maskOverlay,
-                       showMask: model.showMask,
-                       selectionEnabled: model.selectionMode,
-                       selection: $model.selection)
+            CanvasView()
         } else {
             EmptyCanvasView { showOpen = true }
         }
@@ -114,6 +110,7 @@ struct EditorView: View {
             Picker("面板", selection: $tab) {
                 Text("调色").tag(0)
                 Text("AI").tag(1)
+                Text("笔刷").tag(2)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -121,10 +118,10 @@ struct EditorView: View {
 
             ScrollView {
                 VStack(spacing: 12) {
-                    if tab == 0 {
-                        TonePanel().environmentObject(model)
-                    } else {
-                        AIPanel().environmentObject(model)
+                    switch tab {
+                    case 0: TonePanel().environmentObject(model)
+                    case 1: AIPanel().environmentObject(model)
+                    default: BrushPanel().environmentObject(model)
                     }
                 }
                 .padding(.horizontal, 12)
