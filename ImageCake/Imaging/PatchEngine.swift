@@ -29,9 +29,9 @@ enum PatchEngine {
         guard !strokes.isEmpty else { return image }
         let w = image.size.width
         let h = image.size.height
-        let c = image.channels
-        var result = image.floats
-        let src = image.floats
+        let c = 4
+        var result = image.pixels
+        let src = image.pixels
 
         for stroke in strokes {
             let pixelRadius = max(1, Int(stroke.radius * Double(max(w, h))))
@@ -62,7 +62,7 @@ enum PatchEngine {
                 }
             }
         }
-        return DisplayImage(width: w, height: h, channels: c, floats: result)
+        return DisplayImage(size: PixelSize(width: w, height: h), pixels: result)
     }
 
     private static func weightAt(_ dist: Double, radius: Double, hardness: Double) -> Double {

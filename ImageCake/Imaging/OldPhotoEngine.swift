@@ -19,8 +19,8 @@ enum OldPhotoEngine {
         let shiftR = targetGray - avg.r
         let shiftG = targetGray - avg.g
         let shiftB = targetGray - avg.b
-        let floats = image.floats
-        let c = image.channels
+        let floats = image.pixels
+        let c = 4
         var result = floats
         for i in 0..<(floats.count / c) {
             if c >= 3 {
@@ -29,8 +29,7 @@ enum OldPhotoEngine {
                 result[i * c + 2] = max(0, min(1, floats[i * c + 2] + Float(shiftB)))
             }
         }
-        return (DisplayImage(width: image.size.width, height: image.size.height,
-                             channels: c, floats: result),
+        return (DisplayImage(size: image.size, pixels: result),
                 CGPoint(x: shiftR, y: shiftB))
     }
 
@@ -38,8 +37,8 @@ enum OldPhotoEngine {
     static func removeScratches(_ image: DisplayImage, threshold: Double = 0.15) -> DisplayImage {
         let w = image.size.width
         let h = image.size.height
-        let c = image.channels
-        let src = image.floats
+        let c = 4
+        let src = image.pixels
         let opened = morphologicalOpen(src, width: w, height: h, channels: c, radius: 1)
         var result = src
         for i in 0..<(w * h * c) {
@@ -48,7 +47,7 @@ enum OldPhotoEngine {
                 result[i] = opened[i]
             }
         }
-        return DisplayImage(width: w, height: h, channels: c, floats: result)
+        return DisplayImage(size: PixelSize(width: w, height: h), pixels: result)
     }
 
     /// 一步完成：先去划痕再恢复褪色。
@@ -60,8 +59,8 @@ enum OldPhotoEngine {
     // MARK: - 内部
 
     private static func averageColor(_ image: DisplayImage) -> (r: Double, g: Double, b: Double) {
-        let floats = image.floats
-        let c = image.channels
+        let floats = image.pixels
+        let c = 4
         let count = floats.count / c
         guard count > 0, c >= 3 else { return (0.5, 0.5, 0.5) }
         var sr: Double = 0, sg: Double = 0, sb: Double = 0

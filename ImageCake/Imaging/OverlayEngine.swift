@@ -1,5 +1,7 @@
 import CoreGraphics
+import CoreText
 import Foundation
+import ImageIO
 
 // 水印 / 边框 / 文字贴纸。
 //
@@ -10,6 +12,8 @@ import Foundation
 //   · 水印：一张半透明图（logo）平铺或定位于角落
 //   · 边框：纯色或渐色框，按比例算宽度
 //   · 文字：一行字符串，指定字体/大小/颜色/位置
+//
+// 文字渲染用 CoreText（跨平台），不依赖 UIKit/AppKit。
 
 struct OverlayElement: Equatable, Sendable, Identifiable {
     enum Kind: Equatable, Sendable {
@@ -82,45 +86,48 @@ enum OverlayEngine {
         let w = image.size.width
         let h = image.size.height
         let fontSize = max(8, Int(Double(min(w, h)) * sizeRatio))
-        #if canImport(UIKit)
-        let font = UIFont(name: fontName, size: CGFloat(fontSize)) ?? UIFont.systemFont(ofSize: CGFloat(fontSize))
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: UIColor(r: color.r, g: color.g, b: color.b, a: color.a)
-        ]
-        let size = (text as NSString).size(withAttributes: attrs)
-        let point = positionPoint(position, textSize: size, canvasSize: image.size)
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: w, height: h))
-        let rendered = renderer.image { ctx in
-            ctx.cgContext.draw(in: CGRect(x: 0, y: 0, width: w, height: h), image: image.cgImage() ?? CIImage().createCGImage(from: CGRect(x: 0, y: 0, width: w, height: h))!)
-            (text as NSString).draw(at: point, withAttributes: attrs)
+
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(data: nil, width: w, height: h,
+                                      bitsPerComponent: 8, bytesPerRow: w * 4,
+                                      space: colorSpace,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return image }
+
+        if let cgImg = image.cgImage() {
+            context.saveGState()
+            context.translateBy(x: 0, y: CGFloat(h))
+            context.scaleBy(x: 1, y: -1)
+            context.draw(cgImg, in: CGRect(x: 0, y: 0, width: w, height: h))
+            context.restoreGState()
         }
-        return RGBA8Buffer(cgImage: rendered.cgImage!, size: image.size) ?? image
-        #elseif canImport(AppKit)
-        let font = NSFont(name: fontName, size: CGFloat(fontSize)) ?? NSFont.systemFont(ofSize: CGFloat(fontSize))
+
+        let font = CTFontCreateWithNameAndSize(fontName as CFString, CGFloat(fontSize))
+        let textColor = CGColor(colorSpace: colorSpace, components: [
+            CGFloat(color.r) / 255, CGFloat(color.g) / 255,
+            CGFloat(color.b) / 255, CGFloat(color.a) / 255,
+        ]) ?? CGColor(red: 1, green: 1, blue: 1, alpha: 1)
         let attrs: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: NSColor(calibratedRed: CGFloat(color.r)/255, green: CGFloat(color.g)/255, blue: CGFloat(color.b)/255, alpha: CGFloat(color.a)/255)
+            .foregroundColor: textColor,
         ]
-        let size = (text as NSString).size(withAttributes: attrs)
-        let point = positionPoint(position, textSize: size, canvasSize: image.size)
-        guard let cgImage = image.cgImage() else { return image }
-        let nsImage = NSImage(size: NSSize(width: w, height: h))
-        nsImage.lockFocus()
-        NSGraphicsContext.current?.cgContext.draw(cgImage, in: CGRect(x: 0, y: 0, width: w, height: h))
-        (text as NSString).draw(at: NSPoint(x: point.x, y: h - point.y - size.height), withAttributes: attrs)
-        nsImage.unlockFocus()
-        guard let rep = nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return image }
-        return RGBA8Buffer(cgImage: rep, size: image.size) ?? image
-        #else
-        return image
-        #endif
+        let attrString = CFAttributedStringCreate(nil, text as CFString, attrs as CFDictionary)!
+        let line = CTLineCreateWithAttributedString(attrString)
+        let bounds = CTLineGetBoundsWithOptions(line, .useOpticalBounds)
+        let point = positionPoint(position, textSize: bounds.size, canvasSize: image.size)
+
+        context.textPosition = CGPoint(x: point.x, y: CGFloat(h) - point.y - bounds.height)
+        CTLineDraw(line, context)
+
+        guard let resultImage = context.makeImage(),
+              let resultBuffer = rgba8Buffer(from: resultImage) else { return image }
+        return resultBuffer
     }
 
     private static func drawWatermark(_ image: RGBA8Buffer, imageData: Data, opacity: Double,
                                       position: OverlayElement.OverlayPosition, scale: Double) -> RGBA8Buffer {
-        guard let wmCG = CGImage(data: imageData),
-              let wmBuffer = RGBA8Buffer(cgImage: wmCG, size: PixelSize(width: wmCG.width, height: wmCG.height)) else {
+        guard let source = CGImageSourceCreateWithData(imageData as CFData, nil),
+              let wmCG = CGImageSourceCreateImageAtIndex(source, 0, nil),
+              let wmBuffer = rgba8Buffer(from: wmCG) else {
             return image
         }
         let targetW = max(1, Int(Double(image.size.width) * scale))
@@ -162,6 +169,20 @@ enum OverlayEngine {
             }
         }
         return RGBA8Buffer(size: image.size, data: bytes)
+    }
+
+    private static func rgba8Buffer(from cgImage: CGImage) -> RGBA8Buffer? {
+        let w = cgImage.width
+        let h = cgImage.height
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(data: nil, width: w, height: h,
+                                      bitsPerComponent: 8, bytesPerRow: w * 4,
+                                      space: colorSpace,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: w, height: h))
+        guard let data = context.data else { return nil }
+        let bytes = Data(bytes: data, count: w * h * 4)
+        return RGBA8Buffer(size: PixelSize(width: w, height: h), data: bytes)
     }
 
     private static func positionPoint(_ position: OverlayElement.OverlayPosition,
