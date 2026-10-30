@@ -96,7 +96,7 @@ struct ImageDocument: Sendable {
         if oldPhotoRestore {
             let display = ToneEngine.render(workingLinear, params: EditParameters())
             let restored = OldPhotoEngine.restore(display, scratchThreshold: oldPhotoScratchThreshold)
-            workingLinear = LinearImage(rgba8: restored.0.rgba8()) ?? workingLinear
+            workingLinear = LinearImage(display: restored.0) ?? workingLinear
         }
 
         var display = ToneEngine.render(workingLinear, params: params)

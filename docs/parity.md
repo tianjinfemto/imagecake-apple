@@ -26,7 +26,7 @@
 | 人像分割（MODNet 连续 α） | ✅ | 预处理/后处理口径照实测（sRGB 码、symmetric、长边 512 取 32 倍数、截断取整）；**新增 Vision 兜底** |
 | 换底色 / 去色边 | ✅ | 连续 α 合成；defringe 用邻域实心色替换边缘脏色（`EdgeDefringe`，合成前跑，α 不变）；无实心邻居时保守保留 |
 | 背景虚化 | ✅ | 三次盒式模糊近似高斯；半径随长边缩放 |
-| 智能消除（LaMa） | ✅ | 以选区为中心取 512 正方形窗口；大选区不做多窗 tiling（v1 已知降级） |
+| 智能消除（LaMa） | ✅ | 以选区为中心取 512 正方形窗口；大选区自动多窗 tiling（`TileGrid.interiors` 分块，每块各开窗口跑 LaMa，返回多个 `InpaintPatch`） |
 | 修补工具 / 祛路人 | ✅ | `PatchEngine`：同图取样修复（固定偏移量搬纹理），与 LaMa 互补——LaMa 是语义修复（造内容），修补是物理搬运（零推理、毫秒级）；`PatchStroke` 存归一化源点+笔迹，进渲染管线与撤销栈 |
 | 仿制图章 / 液化 / 保护笔刷 | ✅ | 三个工具从算子到渲染到**画布手势**全链路接通：`BrushState` 存笔迹 → `ImageDocument.render()` 重放 → `CanvasView` 单指拖落笔 → `BrushPanel` 工具选择/参数/取样/清除 |
 | 面部重绘（GFPGAN） | ✅ | 512 定宽、1/255、输出自夹取、椭圆羽化、闭眼不改只点名 |
@@ -34,7 +34,7 @@
 | 面部关键点 478 / 五官形变 | ✅ | `FaceLandmarksTask`：Vision 检测人脸框 → 478 点网络推理 → 归一化坐标输出；`AIPanel` 一键检测，结果存 `EditorModel2.faceLandmarksResult` 供五官形变液化消费 |
 | 美体（RTMPose 17 点） | ✅ | `BodyPoseTask`：需先抠图获取人像 α → 外接框内跑 RTMPose-m → 17 关节点（COCO 格式）；`AIPanel` 一键检测 |
 | 人脸年龄/性别分组 | ✅ | `FaceAttrTask`：两颗独立网络（FairFace age/gender），每张脸裁切喂入 → argmax → 区间标签；`AIPanel` 一键识别，结果按脸显示 |
-| 老照片褪色/划痕 | ✅ | `OldPhotoEngine`：褪色恢复（灰世界白平衡反推偏色）+ 划痕去除（形态学开运算检测细线 + 邻域填充）；零权重、确定性，在调色之前执行；`AIPanel` 一键开关 |
+| 老照片褪色/划痕 | ✅ | `OldPhotoEngine`：褪色恢复（灰世界白平衡反推偏色）+ 划痕去除（形态学开运算检测细线 + 邻域填充）；零权重、确定性，在调色之前执行；`LinearImage(display:)` 直接 Float 转线性，保留 16bit 精度；`AIPanel` 一键开关 |
 | 衣物/证件照换装 | ⛔ | 需服装分割模型（不在 `models.json` 清单里）；模板合成与服装分割都不在 v1 |
 
 ## 3. 交付与工作流

@@ -113,7 +113,7 @@ struct MattingResult: Sendable {
 }
 
 struct InpaintResult: Sendable {
-    var patch: InpaintPatch?
+    var patches: [InpaintPatch]
     var report: AIReport
 }
 

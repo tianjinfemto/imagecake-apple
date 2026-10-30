@@ -101,6 +101,22 @@ struct LinearImage: Sendable {
         self.init(size: buffer.size, pixels: out)
     }
 
+    /// 从显示域 Float 直接转线性，不经过 8bit 量化——保留全精度供 16bit 导出。
+    init?(display: DisplayImage) {
+        guard display.size.pixelCount > 0 else { return nil }
+        var out = [Float](repeating: 0, count: display.size.pixelCount * 4)
+        let src = display.pixels
+        for i in 0 ..< display.size.pixelCount {
+            let o = i * 4
+            for c in 0 ..< 3 {
+                let v = src[o + c]
+                out[o + c] = v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
+            }
+            out[o + 3] = src[o + 3]
+        }
+        self.init(size: display.size, pixels: out)
+    }
+
     func resized(maxEdge: Int) -> LinearImage {
         guard maxEdge > 0, size.longEdge > maxEdge else { return self }
         let scale = Double(maxEdge) / Double(size.longEdge)

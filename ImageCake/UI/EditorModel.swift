@@ -421,17 +421,18 @@ final class EditorModel: ObservableObject {
         }.value
         let mask = Self.rectangleMask(size: bytes.size, rect: rect)
         let result = await InpaintTask.run(display: bytes, mask: mask, store: store, ort: ort)
-        lastAIPath = result.patch == nil ? "none" : "lama"
+        lastAIPath = result.patches.isEmpty ? "none" : "lama"
         lastAINote = result.report.note
-        guard let patch = result.patch else {
+        guard !result.patches.isEmpty else {
             alert = result.report.note
             return
         }
-        mutateDocument { $0.patches.append(patch) }
+        mutateDocument { $0.patches.append(contentsOf: result.patches) }
         selection = nil
         selectionMode = false
         await renderNow()
-        status = "消除完成 · 窗口 \(patch.rect.width)×\(patch.rect.height) · \(Int(result.report.elapsedMs))ms"
+        let firstRect = result.patches[0].rect
+        status = "消除完成 · \(result.patches.count) 窗 · \(firstRect.width)×\(firstRect.height) · \(Int(result.report.elapsedMs))ms"
     }
 
     func undoLastPatch() {
