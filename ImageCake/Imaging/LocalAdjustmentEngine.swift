@@ -39,7 +39,7 @@ enum LocalAdjustmentEngine {
         guard adjustments.contains(where: { $0.enabled && !$0.isNeutral }) else { return image }
         var result = image
         for adj in adjustments where adj.enabled && !adj.isNeutral {
-            let mask = StrokeRasterizer.rasterize(adj.mask, in: image.size)
+            let mask = StrokeRasterizer.mask(strokes: [adj.mask], size: image.size)
             let feathered = MaskOps.feathered(mask, radius: max(1, Int(adj.feather * Double(max(image.size.width, image.size.height)))))
             let localParams = localParams(from: adj)
             let locallyToned = ToneEngine.render(linear, params: localParams)
@@ -62,9 +62,9 @@ enum LocalAdjustmentEngine {
     private static func blend(base: DisplayImage, overlay: DisplayImage, mask: MaskBuffer) -> DisplayImage {
         let w = base.size.width
         let h = base.size.height
-        let c = base.channels
-        var result = base.floats
-        let overlayFloats = overlay.floats
+        let c = 4
+        var result = base.pixels
+        let overlayFloats = overlay.pixels
         mask.data.withUnsafeBytes { maskPtr in
             let maskBytes = maskPtr.bindMemory(to: UInt8.self)
             for i in 0..<(w * h) {
@@ -74,6 +74,6 @@ enum LocalAdjustmentEngine {
                 }
             }
         }
-        return DisplayImage(width: w, height: h, channels: c, floats: result)
+        return DisplayImage(size: PixelSize(width: w, height: h), pixels: result)
     }
 }

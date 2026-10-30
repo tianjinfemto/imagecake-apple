@@ -1,4 +1,9 @@
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 // 装饰面板：水印 / 边框 / 文字贴纸。
 //
@@ -31,7 +36,7 @@ struct OverlayPanel: View {
                       format: { String(format: "%.3f", $0) },
                       value: $borderWidth)
             Button {
-                let rgba = UIColor(borderColor).toRGBA8()
+                let rgba = colorToRGBA8(borderColor)
                 let element = OverlayElement(id: UUID(),
                                              kind: .border(color: rgba, widthRatio: borderWidth))
                 model.addOverlay(element)
@@ -58,7 +63,7 @@ struct OverlayPanel: View {
             }
             .pickerStyle(.segmented)
             Button {
-                let rgba = UIColor(textColor).toRGBA8()
+                let rgba = colorToRGBA8(textColor)
                 let element = OverlayElement(id: UUID(),
                                              kind: .text(textContent, fontName: "Helvetica",
                                                         sizeRatio: textSize, color: rgba,
@@ -121,10 +126,12 @@ struct OverlayPanel: View {
     }
 }
 
-private extension UIColor {
-    func toRGBA8() -> RGBA8 {
-        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-        getRed(&r, green: &g, blue: &b, alpha: &a)
-        return RGBA8(r: UInt8(r * 255), g: UInt8(g * 255), b: UInt8(b * 255), a: UInt8(a * 255))
-    }
+private func colorToRGBA8(_ color: Color) -> RGBA8 {
+    var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+    #if canImport(UIKit)
+    UIColor(color).getRed(&r, green: &g, blue: &b, alpha: &a)
+    #elseif canImport(AppKit)
+    (NSColor(color).usingColorSpace(.sRGB) ?? NSColor.black).getRed(&r, green: &g, blue: &b, alpha: &a)
+    #endif
+    return RGBA8(r: UInt8(r * 255), g: UInt8(g * 255), b: UInt8(b * 255), a: UInt8(a * 255))
 }

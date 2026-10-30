@@ -16,10 +16,10 @@ import Foundation
 enum GeometryEngine {
     /// 90° 倍数旋转。快速路径：整像素搬运，不插值，不丢质量。
     static func rotate90(_ image: DisplayImage, clockwise: Bool) -> DisplayImage {
-        let src = image.floats
+        let src = image.pixels
         let w = image.size.width
         let h = image.size.height
-        let c = image.channels
+        let c = 4
         var dst = [Float](repeating: 0, count: w * h * c)
         if clockwise {
             for y in 0..<h {
@@ -31,7 +31,7 @@ enum GeometryEngine {
                     }
                 }
             }
-            return DisplayImage(width: h, height: w, channels: c, floats: dst)
+            return DisplayImage(size: PixelSize(width: h, height: w), pixels: dst)
         } else {
             for y in 0..<h {
                 for x in 0..<w {
@@ -42,16 +42,16 @@ enum GeometryEngine {
                     }
                 }
             }
-            return DisplayImage(width: h, height: w, channels: c, floats: dst)
+            return DisplayImage(size: PixelSize(width: h, height: w), pixels: dst)
         }
     }
 
     /// 水平/垂直翻转。
     static func flip(_ image: DisplayImage, horizontal: Bool) -> DisplayImage {
-        let src = image.floats
+        let src = image.pixels
         let w = image.size.width
         let h = image.size.height
-        let c = image.channels
+        let c = 4
         var dst = [Float](repeating: 0, count: w * h * c)
         if horizontal {
             for y in 0..<h {
@@ -72,7 +72,7 @@ enum GeometryEngine {
                 }
             }
         }
-        return DisplayImage(width: w, height: h, channels: c, floats: dst)
+        return DisplayImage(size: PixelSize(width: w, height: h), pixels: dst)
     }
 
     /// 任意角度旋转（双线性反向采样）。角度以度为单位，正 = 顺时针。
@@ -85,7 +85,7 @@ enum GeometryEngine {
 
         let w = image.size.width
         let h = image.size.height
-        let c = image.channels
+        let c = 4
         let rad = degrees * .pi / 180
         let cosA = cos(rad)
         let sinA = sin(rad)
@@ -96,7 +96,7 @@ enum GeometryEngine {
         let ncx = Double(newW) / 2
         let ncy = Double(newH) / 2
         var dst = [Float](repeating: 0, count: newW * newH * c)
-        let src = image.floats
+        let src = image.pixels
         src.withUnsafeBufferPointer { srcPtr in
             dst.withUnsafeMutableBufferPointer { dstPtr in
                 for y in 0..<newH {
@@ -114,7 +114,7 @@ enum GeometryEngine {
                 }
             }
         }
-        return DisplayImage(width: newW, height: newH, channels: c, floats: dst)
+        return DisplayImage(size: PixelSize(width: newW, height: newH), pixels: dst)
     }
 
     /// 裁剪到归一化矩形。

@@ -54,9 +54,9 @@ enum BatchQueue {
                 let outcome = await ExportPipeline.render(doc, store: store, ort: ort, fullResolution: false)
                 let data = try ExportPipeline.encode(outcome, format: config.format,
                                                       quality: config.quality, maxEdge: config.maxEdge)
-                let filename = ExportNaming.format(config.namingTemplate,
-                                                    stem: item.url.deletingPathExtension().lastPathComponent,
-                                                    ext: config.format.fileExtension)
+                let filename = ExportNaming.filename(template: config.namingTemplate,
+                                                      stem: item.url.deletingPathExtension().lastPathComponent,
+                                                      ext: config.format.fileExtension)
                 let outputURL = config.outputDirectory.appendingPathComponent(filename)
                 try data.write(to: outputURL)
                 results[index].status = .done

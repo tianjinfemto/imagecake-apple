@@ -37,6 +37,8 @@ struct PixelRect: Hashable, Sendable {
     var isEmpty: Bool { width <= 0 || height <= 0 }
     var maxX: Int { x + width }
     var maxY: Int { y + height }
+    var midX: Int { x + width / 2 }
+    var midY: Int { y + height / 2 }
 
     func intersected(with other: PixelRect) -> PixelRect {
         let x0 = max(x, other.x)

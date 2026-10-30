@@ -78,7 +78,7 @@ enum ExportPipeline {
             notes.append("[export_downscaled] 导出上限 \(maxRenderPixels) 像素")
         }
 
-        let working = ImageDocument(linear: linear,
+        var working = ImageDocument(linear: linear,
                                     originalSize: document.originalSize,
                                     params: document.params,
                                     sourceURL: document.sourceURL,

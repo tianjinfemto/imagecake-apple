@@ -33,6 +33,6 @@ enum ICCProfile {
     /// 导出时给 properties 字典加 ICC 数据（备用路径，用于不经过 CGImage 的编码）。
     static func sRGBProfileData() -> Data? {
         guard let sRGB = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
-        return sRGB.iccData
+        return sRGB.iccData as Data?
     }
 }
