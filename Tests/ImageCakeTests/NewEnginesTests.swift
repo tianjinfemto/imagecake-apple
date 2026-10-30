@@ -21,14 +21,14 @@ final class NewEnginesTests: XCTestCase {
         let image = TestImage.gradient(width: 4, height: 4)
         let flipped = GeometryEngine.flip(image, horizontal: true)
         let back = GeometryEngine.flip(flipped, horizontal: true)
-        XCTAssertEqual(back.floats, image.floats, "翻转两次应回到原图")
+        XCTAssertEqual(back.pixels, image.pixels, "翻转两次应回到原图")
     }
 
     func testFlipVerticalIsInvolutive() {
         let image = TestImage.gradient(width: 4, height: 4)
         let flipped = GeometryEngine.flip(image, horizontal: false)
         let back = GeometryEngine.flip(flipped, horizontal: false)
-        XCTAssertEqual(back.floats, image.floats)
+        XCTAssertEqual(back.pixels, image.pixels)
     }
 
     func testRotate360IsIdentity() {
@@ -68,7 +68,7 @@ final class NewEnginesTests: XCTestCase {
     func testPatchEngineNoStrokesIsIdentity() {
         let image = TestImage.gradient(width: 8, height: 8)
         let result = PatchEngine.apply(image, strokes: [])
-        XCTAssertEqual(result.floats, image.floats)
+        XCTAssertEqual(result.pixels, image.pixels)
     }
 
     // MARK: - SmartCropEngine
@@ -129,7 +129,7 @@ final class NewEnginesTests: XCTestCase {
 
     func testCollageComposeReturnsNilForInsufficientImages() {
         let images = [TestImage.solidRGBA8(width: 4, height: 4, r: 255, g: 0, b: 0)]
-        let template = CollageEngine.templates[2] // 2×2 需要 4 张
+        let template = CollageEngine.templates[2]
         let result = CollageEngine.compose(images: images, template: template,
                                            canvasSize: PixelSize(width: 100, height: 100))
         XCTAssertNil(result, "图不够应返回 nil")
@@ -169,9 +169,9 @@ final class NewEnginesTests: XCTestCase {
         let image = TestImage.gradient(width: 8, height: 8)
         let adj = LocalAdjustment(mask: BrushStroke(points: [CGPoint(x: 0.5, y: 0.5)], radius: 0.1))
         XCTAssertTrue(adj.isNeutral)
-        let linear = LinearImage(size: image.size, channels: 3, floats: image.floats)
+        let linear = LinearImage(size: image.size, pixels: image.pixels)
         let result = LocalAdjustmentEngine.apply(image, adjustments: [adj], linear: linear)
-        XCTAssertEqual(result.floats, image.floats, "中性本地调节不应改变画面")
+        XCTAssertEqual(result.pixels, image.pixels, "中性本地调节不应改变画面")
     }
 }
 
@@ -179,27 +179,28 @@ final class NewEnginesTests: XCTestCase {
 
 enum TestImage {
     static func solid(width: Int, height: Int, r: Double, g: Double, b: Double) -> DisplayImage {
-        let floats = [Float](repeating: 0, count: width * height * 3)
-        var result = floats
+        var pixels = [Float](repeating: 0, count: width * height * 4)
         for i in 0..<(width * height) {
-            result[i * 3] = Float(r)
-            result[i * 3 + 1] = Float(g)
-            result[i * 3 + 2] = Float(b)
+            pixels[i * 4] = Float(r)
+            pixels[i * 4 + 1] = Float(g)
+            pixels[i * 4 + 2] = Float(b)
+            pixels[i * 4 + 3] = 1.0
         }
-        return DisplayImage(width: width, height: height, channels: 3, floats: result)
+        return DisplayImage(size: PixelSize(width: width, height: height), pixels: pixels)
     }
 
     static func gradient(width: Int, height: Int) -> DisplayImage {
-        var floats = [Float](repeating: 0, count: width * height * 3)
+        var pixels = [Float](repeating: 0, count: width * height * 4)
         for y in 0..<height {
             for x in 0..<width {
-                let idx = (y * width + x) * 3
-                floats[idx] = Float(x) / Float(width)
-                floats[idx + 1] = Float(y) / Float(height)
-                floats[idx + 2] = 0.5
+                let idx = (y * width + x) * 4
+                pixels[idx] = Float(x) / Float(width)
+                pixels[idx + 1] = Float(y) / Float(height)
+                pixels[idx + 2] = 0.5
+                pixels[idx + 3] = 1.0
             }
         }
-        return DisplayImage(width: width, height: height, channels: 3, floats: floats)
+        return DisplayImage(size: PixelSize(width: width, height: height), pixels: pixels)
     }
 
     static func solidRGBA8(width: Int, height: Int, r: UInt8, g: UInt8, b: UInt8) -> RGBA8Buffer {
