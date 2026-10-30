@@ -52,7 +52,10 @@ enum CloneStampEngine {
 
         for stamp in stamps {
             guard !stamp.points.isEmpty else { continue }
-            let strength = min(max(stamp.strength, 0), 1)
+            // stamp.strength 是 Double，这里就转成 Float：后面要和
+            // Float(weight) / 255 相乘，混用会让编译器去找不存在的重载
+            // （报出来的错会是莫名其妙的 Duration 类型不匹配）。
+            let strength = Float(min(max(stamp.strength, 0), 1))
             guard strength > 0 else { continue }
 
             let mask = StrokeRasterizer.mask(
