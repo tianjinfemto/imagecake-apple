@@ -92,7 +92,9 @@ enum XMPImporter {
         guard let v = Double(value) else { return }
         switch mapping {
         case .exposure: params.exposure = v
-        case .temperature: params.temperature = v
+        case .temperature:
+            // crs:Temperature 是开尔文（2000...50000），app 用 -100...100（0 = 6500K）
+            params.temperature = (v - 6500) / 50
         case .tint: params.tint = v
         case .contrast: params.contrast = v
         case .saturation: params.saturation = v

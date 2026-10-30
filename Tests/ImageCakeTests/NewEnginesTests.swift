@@ -102,7 +102,7 @@ final class NewEnginesTests: XCTestCase {
         var params = EditParameters()
         let (result, unknown) = XMPImporter.import_(xmp, into: params)
         XCTAssertEqual(result.exposure, 1.5, accuracy: 0.001)
-        XCTAssertEqual(result.temperature, 3000, accuracy: 0.001)
+        XCTAssertEqual(result.temperature, -70, accuracy: 0.001, "3000K → (3000-6500)/50 = -70")
         XCTAssertEqual(result.contrast, 20, accuracy: 0.001)
         XCTAssertEqual(unknown.count, 0)
     }
