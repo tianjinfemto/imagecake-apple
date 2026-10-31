@@ -168,7 +168,7 @@ final class BeautyEngineTests: XCTestCase {
         for y in 4 ..< 12 {
             for x in 4 ..< 12 {
                 let o = (y * size.width + x) * 4
-                XCTAssertEqual(smoothed.pixels[o], ramp.pixels[o], accuracy: 1e-3, "平滑渐变不是瑕疵，不该被填")
+                XCTAssertEqual(smoothed.pixels[o], ramp[o], accuracy: 1e-3, "平滑渐变不是瑕疵，不该被填")
             }
         }
     }
@@ -250,7 +250,7 @@ final class BeautyEngineTests: XCTestCase {
 
         func luma(_ x: Int, _ y: Int, _ buffer: [Float]) -> Double {
             let o = (y * size.width + x) * 4
-            return ColorMath.luma(Float(buffer[o]), Float(buffer[o + 1]), Float(buffer[o + 2]))
+            return Double(ColorMath.luma(Float(buffer[o]), Float(buffer[o + 1]), Float(buffer[o + 2])))
         }
         XCTAssertLessThan(luma(10, 10, result.pixels), luma(10, 10, pixels), "油光亮斑要被压下去")
         XCTAssertEqual(luma(1, 1, result.pixels), luma(1, 1, pixels), accuracy: 1e-5, "非亮斑不该被动")
