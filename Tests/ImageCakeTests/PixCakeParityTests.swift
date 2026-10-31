@@ -170,8 +170,8 @@ final class PixCakeParityTests: XCTestCase {
                 }
             }
         }
-        paint(xRange: (peakX - 6) ..< (peakX - 2), value: 0.40)   // 暗
-        paint(xRange: (peakX + 2) ..< (peakX + 8), value: 0.95)   // 亮
+        paint((peakX - 6) ..< (peakX - 2), 0.40)   // 暗
+        paint((peakX + 2) ..< (peakX + 8), 0.95)   // 亮
         let input = DisplayImage(size: size, pixels: pixels)
 
         var beauty = BeautyParameters()
@@ -192,17 +192,19 @@ final class PixCakeParityTests: XCTestCase {
         let geometry = FaceGeometry.from(points: BeautyEngineTests.syntheticFacePoints())!
         let weights = RegionEnhance.underEyeWeights(geometry, size: size)
         let peak = argmax(weights)
+        let peakY = peak / size.width
+        let peakX = peak % size.width
         var pixels = solidFace(size).pixels
         // 睫毛级黑线（L < 0.15）落在作用区正中的峰值行上。
         for x in (peakX - 4) ... (peakX + 4) {
-            let o = ((peak / size.width) * size.width + x) * 4
+            let o = (peakY * size.width + x) * 4
             pixels[o] = 0.05; pixels[o + 1] = 0.05; pixels[o + 2] = 0.05
         }
         let input = DisplayImage(size: size, pixels: pixels)
         var beauty = BeautyParameters()
         beauty.darkCircle = 100
         let result = RegionEnhance.apply(input, geometries: [geometry], beauty: beauty)
-        let o = ((peak / size.width) * size.width + peakX) * 4
+        let o = (peakY * size.width + peakX) * 4
         XCTAssertEqual(result.pixels[o], input.pixels[o], accuracy: 1e-6,
                        "极暗像素不抬，否则眼下会出现一圈白边")
     }
@@ -424,19 +426,19 @@ final class PixCakeParityTests: XCTestCase {
         XCTAssertEqual(channel(25, 75, 2), 255, "左下格 = 蓝")
         XCTAssertEqual(channel(75, 75, 0), 255, "右下格 = 黄")
         XCTAssertEqual(channel(75, 75, 2), 0)
-        // 满铺模板不该露出底色（末行/末列可能落在取整后的 1 像素缝隙里，只扫到 98）。
+        // 满铺模板不该露出底色（元组不能当 Equatable 比较，逐通道判）。
         for y in stride(from: 1, to: 99, by: 9) {
-            for x in stride(from: 1, to: 99, by: 9) {
-                XCTAssertNotEqual((channel(x, y, 0), channel(x, y, 1), channel(x, y, 2)),
-                                  (255, 255, 255), "\(x),\(y) 露出了底色")
+            for x in stride(from: 1, to: 99, by: 9) where channel(x, y, 0) == 255 {
+                XCTAssertFalse(channel(x, y, 1) == 255 && channel(x, y, 2) == 255,
+                               "\(x),\(y) 露出了底色")
             }
         }
     }
 
     func testCollageShortfallIsNamedInsteadOfFaked() {
         let missing = CollageComposition(templateID: UUID())
-        XCTAssertTrue(missing.missingTemplateNote.contains("[collage_no_template]"),
-                      "模板找不到也要点名，实际：\(missing.missingTemplateNote)")
+        XCTAssertTrue(CollageComposition.missingTemplateNote.contains("[collage_no_template]"),
+                      "模板找不到也要点名，实际：\(CollageComposition.missingTemplateNote)")
         XCTAssertEqual(missing.shortfallWarning(slots: 4), nil, "模板不存在时不该再报缺图")
 
         var two = CollageComposition(templateID: UUID(), extraURLs: [URL(fileURLWithPath: "/a.jpg"),
@@ -447,7 +449,7 @@ final class PixCakeParityTests: XCTestCase {
         XCTAssertNil(two.shortfallWarning(slots: 4), "显式允许重复后不再算缺图")
     }
 
-    func testCollageWarningReachesDocumentAndExportCarriesIt() {
+    func testCollageWarningReachesDocumentAndExportCarriesIt() async {
         let size = PixelSize(width: 16, height: 16)
         let template = CollageEngine.templates.first { $0.name.contains("2×2") }!
         var document = PipelineWiringDocument.make(size: size)

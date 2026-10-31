@@ -37,7 +37,7 @@ enum BeautyEngine {
                        volume: beauty.smoothMode == 1)
         }
         if beauty.blemish > 0 {
-            blemishPass(&pixels, base: base, size: size, skin: maxLayer(face, body, size),
+            blemishPass(&pixels, base: base, size: size, skin: maxLayer(face, body, size: size),
                         amount: BeautyParameters.unit(beauty.blemish))
         }
         if beauty.hasToneWork {
@@ -204,13 +204,20 @@ enum BeautyEngine {
     // MARK: - 对立色空间（线性，往返恒等）
 
     /// L 用 Rec.709 权重；A = R−G（红绿轴）；B = B−(R+G)/2（蓝黄轴）。
+    ///
+    /// 权重要显式转 Double：`ColorMath.luma*` 是 Float，而本函数吃 Double，
+    /// Float×Double 在 Swift 里不是合法运算（只能靠隐式字面量转换），
+    /// 不写出来编译器会去做重载搜索，症状是"编译器无法在合理时间内推导"。
     static func opponent(r: Double, g: Double, b: Double) -> (l: Double, a: Double, b: Double) {
-        (ColorMath.lumaR * r + ColorMath.lumaG * g + ColorMath.lumaB * b, r - g, b - (r + g) / 2)
+        let l = Double(ColorMath.lumaR) * r + Double(ColorMath.lumaG) * g + Double(ColorMath.lumaB) * b
+        return (l, r - g, b - (r + g) / 2)
     }
 
     /// 反解：权重和为 1，所以 G = L − lR·A − lB·(B + A/2)…，闭式解，无迭代。
     static func fromOpponent(l: Double, a: Double, b: Double) -> (r: Double, g: Double, b: Double) {
-        let green = l - ColorMath.lumaB * b - (ColorMath.lumaR + ColorMath.lumaB * 0.5) * a
+        let lumaB = Double(ColorMath.lumaB)
+        let lumaR = Double(ColorMath.lumaR)
+        let green = l - lumaB * b - (lumaR + lumaB * 0.5) * a
         return (green + a, green, green + a / 2 + b)
     }
 
