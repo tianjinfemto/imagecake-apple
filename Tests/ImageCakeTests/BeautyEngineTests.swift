@@ -311,7 +311,10 @@ final class BeautyEngineTests: XCTestCase {
     func testDiskMaskIsCenteredAndSmooth() {
         let size = PixelSize(width: 41, height: 41)
         let disk = RegionRaster.disk(center: CGPoint(x: 20, y: 20), radiusX: 10, radiusY: 10, size: size)
-        XCTAssertEqual(Int(disk.data[20 * 41 + 20]), 255)
+        // 采样用的是像素中心（x + 0.5），而盘心落在像素角上，所以中心格差 0.5px
+        // → smoothstep 给出 251而不是 255。拿≥ 250 钉住"中心满"这件事，
+        // 而不是拿 255 钉住一个不存在精确中心的栅格器。
+        XCTAssertGreaterThanOrEqual(Int(disk.data[20 * 41 + 20]), 250, "中心满")
         XCTAssertEqual(Int(disk.data[20 * 41 + 35]), 0, "半径外为 0")
         let center = Double(disk.data[20 * 41 + 20]), edge = Double(disk.data[20 * 41 + 27])
         XCTAssertGreaterThan(center, edge, "从中心到边缘单调落下")

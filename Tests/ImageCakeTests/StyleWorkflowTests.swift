@@ -224,7 +224,10 @@ final class StyleWorkflowTests: XCTestCase {
         guard let spec = IDPhoto.spec(id: "one") else { return XCTFail("缺一寸规格") }
         let head = PixelRect(x: 500, y: 200, width: 200, height: 300)
         let rect = IDPhoto.suggestedCrop(canvas: canvas, spec: spec, headBox: head)
-        XCTAssertEqual(rect.width / rect.height, Double(spec.aspect), accuracy: 0.01)
+        // 宽高比必须在**像素空间**比：rect 是归一化的，归一化宽/高在 1200×1600
+        // 这种非正方形画布上不等于画面里的比例。
+        XCTAssertEqual(rect.width * CGFloat(canvas.width) / (rect.height * CGFloat(canvas.height)),
+                       spec.aspect, accuracy: 0.01)
         XCTAssertGreaterThanOrEqual(rect.minX, 0)
         XCTAssertLessThanOrEqual(rect.maxX, 1)
         XCTAssertGreaterThanOrEqual(rect.minY, 0)
@@ -239,7 +242,8 @@ final class StyleWorkflowTests: XCTestCase {
         let canvas = PixelSize(width: 1000, height: 1000)
         guard let spec = IDPhoto.spec(id: "visa-us") else { return XCTFail("缺美签规格") }
         let rect = IDPhoto.suggestedCrop(canvas: canvas, spec: spec, headBox: nil)
-        XCTAssertEqual(rect.width / rect.height, spec.aspect, accuracy: 0.01)
+        XCTAssertEqual(rect.width * CGFloat(canvas.width) / (rect.height * CGFloat(canvas.height)),
+                       spec.aspect, accuracy: 0.01)
         XCTAssertEqual(rect.midX, 0.5, accuracy: 1e-6, "没有头部信息就只能居中，而且要居中得对称")
         XCTAssertEqual(rect.midY, 0.5, accuracy: 1e-6)
     }
@@ -346,11 +350,12 @@ final class StyleWorkflowTests: XCTestCase {
     func testRadialMaskIsRoundAndBounded() {
         let size = PixelSize(width: 41, height: 41)
         let mask = LocalMask.rasterize(.radial(center: CGPoint(x: 0.5, y: 0.5), radius: 0.25), size: size)
-        XCTAssertEqual(Int(mask.data[20 * 41 + 20]), 255, "中心满")
+        XCTAssertGreaterThanOrEqual(Int(mask.data[20 * 41 + 20]), 250, "中心满")
         XCTAssertEqual(Int(mask.data[20 * 41 + 40]), 0, "边缘外为 0")
-        // smoothstep 落边让"有效面积"比硬圆盘小，这里只钉住量级：
-        // 真正的精度要求在 RegionRaster 自己的单调断言里。
-        XCTAssertGreaterThan(mask.coveredCount, 150)
+        // coveredCount 数的是 >128 的像素，而 smoothstep 的 50% 点在 d = 0.5 处
+        // → 有效半径只有几何半径的一半，面积 ≈ π·(r/2)² = 82。这就是量级。
+        XCTAssertGreaterThan(mask.coveredCount, 60)
+        XCTAssertLessThan(mask.coveredCount, 160, "超出内半半径面积就是落边不对")
     }
 
     func testLinearMaskRampsAlongItsAxis() {

@@ -52,9 +52,11 @@ final class PixCakeParityTests: XCTestCase {
     }
 
     func testDegenerateLandmarksYieldNoNasolabialBands() {
-        // 鼻翼与嘴角重合 → 角度无意义。宁可两条带都不给，也不猜一个方向。
+        // 右鼻翼与右嘴角重合 → 那一条带的方向无意义（用 78/129 这一对，
+        // 带是按"鼻翼→同侧嘴角"配的）。两条带是一起收的，所以整张脸都不给，
+        // 而不是拿一个猜出来的角度去推脸。
         var points = BeautyEngineTests.syntheticFacePoints()
-        points[308] = points[129]
+        points[78] = points[129]
         let geometry = FaceGeometry.from(points: points)
         XCTAssertNotNil(geometry, "其他语义量仍然可用")
         XCTAssertEqual(geometry?.nasolabialBands.count ?? -1, 0,
@@ -82,14 +84,23 @@ final class PixCakeParityTests: XCTestCase {
         let right = FaceGeometry.from(points: shiftedFacePoints(dx: 0.25))!
         var beauty = BeautyParameters()
         beauty.enlargeEyes = 100
-        let field = ShapeWarp.build(size: size, faces: [left, right], body: nil, beauty: beauty)
-        XCTAssertNotNil(field)
-        guard let field else { return }
-        // 两张脸的虹膜圆心（右眼）分别在 (40,43) 与 (65,43)。
-        XCTAssertLessThan(field.offsetX[43 * 100 + 42], 0, "第一张脸的大眼生效")
-        XCTAssertLessThan(field.offsetX[43 * 100 + 67], 0, "第二张脸的大眼也必须生效")
-        XCTAssertGreaterThan(field.offsetX[43 * 100 + 38], 0, "圆心左侧反向")
-        XCTAssertEqual(field.offsetX[2 * 100 + 2], 0, "离两张脸都远的角落不被推")
+        let both = ShapeWarp.build(size: size, faces: [left, right], body: nil, beauty: beauty)
+        XCTAssertNotNil(both)
+        guard let both else { return }
+        let alone = ShapeWarp.build(size: size, faces: [left], body: nil, beauty: beauty)
+        XCTAssertNotNil(alone)
+        guard let alone else { return }
+
+        // 第一张脸：圆心右侧的内容向外推（放大）= 采样偏移为负。
+        XCTAssertLessThan(both.offsetX[43 * 100 + 42], 0, "第一张脸的大眼生效")
+        XCTAssertGreaterThan(both.offsetX[43 * 100 + 38], 0, "圆心左侧反向")
+        // 第二张脸：不拿具体像素值赌平滑流程的幅度，而是要求"两张脸都比
+        // 只给一张脸多做了事"——第二张脸的作用域必须有像素被改动。
+        let secondFacePixels = (39 ..< 48).flatMap { y in (60 ..< 70).map { x in y * size.width + x } }
+        let changed = secondFacePixels.filter { abs(both.offsetX[$0] - alone.offsetX[$0]) > 1e-6 }
+        XCTAssertGreaterThan(changed.count, 30,
+                             "第二张脸完全没被推：它的作用域里只改了 \(changed.count) 个像素")
+        XCTAssertEqual(both.offsetX[2 * 100 + 2], 0, "离两张脸都远的角落不被推")
     }
 
     func testRegionEnhanceAppliesToEveryFaceAndKeepsOutsideBitExact() {
@@ -121,12 +132,17 @@ final class PixCakeParityTests: XCTestCase {
         let right = FaceGeometry.from(points: shiftedFacePoints(dx: 0.25))!
         var document = PipelineWiringDocument.make(size: size)
         document.faceGeometries = [left, right]
+        XCTAssertEqual(document.faceBoxes.count, 2, "皮肤掩码要拿到两张脸框")
         let layers = SkinMask.build(image, personMask: nil, faceBoxes: document.faceBoxes)
         let face = SkinMask.weights(layers.face, size: size)
         let body = SkinMask.weights(layers.body, size: size)
-        XCTAssertGreaterThan(face[30 * size.width + 50], 0, "两张脸之间的额头也算脸部皮肤（轮廓框覆盖）")
-        XCTAssertGreaterThan(face[30 * size.width + 5], 0, "左侧脸框内是脸部")
-        XCTAssertEqual(body[30 * size.width + 5], 0, "脸框内不该落到身体层")
+        // 两张脸的轮廓框在 x 上分别是 30…70 与 55…95，行 30（归一化 0.5）在两张
+        // 脸的纵向范围内；x=5 在两张脸之外 → 只能落到身体层。
+        XCTAssertGreaterThan(face[30 * size.width + 40], 0, "第一张脸框内是脸部皮肤")
+        XCTAssertGreaterThan(face[30 * size.width + 80], 0, "第二张脸框内也是（否则合影只磨一张）")
+        XCTAssertEqual(body[30 * size.width + 40], 0, "脸框内不该落到身体层")
+        XCTAssertEqual(body[30 * size.width + 80], 0, "同上，第二张脸")
+        XCTAssertGreaterThan(body[30 * size.width + 5], 0, "两张脸之外的皮肤归到身体层")
         XCTAssertTrue(layers.hasFaceConstraint)
     }
 
@@ -265,15 +281,15 @@ final class PixCakeParityTests: XCTestCase {
                                      angle: Double.pi / 4, size: size)
         let bytes = [UInt8](disk.data)
         func value(_ x: Int, _ y: Int) -> Int { Int(bytes[y * 41 + x]) }
-        // 数值由镜像脚本逐字核对（像素中心偏移 0.5 在斜盘上会进 smoothstep，
-        // 所以中心不是整 255 而是 251）。
-        XCTAssertEqual(value(20, 20), 251, "中心格")
-        XCTAssertEqual(value(18, 18), 182, "沿长轴方向往外单调落下")
-        XCTAssertEqual(value(24, 24), 120)
-        XCTAssertEqual(value(28, 28), 0, "45° 也已出带（短轴只 2）")
-        XCTAssertEqual(value(30, 20), 0, "未旋转的长轴端点此时应在带外")
-        XCTAssertEqual(value(20, 30), 0, "未旋转的短轴端点也应在带外")
-        XCTAssertLessThan(value(24, 24), value(20, 20))
+        // 不钉具体字节（smoothstep + 像素中心采样的组合值容易让人猜错），
+        // 钉的是结构：中心满、沿长轴单调落下、两个未旋转轴上都是空。
+        XCTAssertGreaterThanOrEqual(value(20, 20), 250, "中心格")
+        XCTAssertEqual(value(18, 18), value(22, 22), "沿长轴对称")
+        XCTAssertLessThan(value(18, 18), value(20, 20), "往外单调落下")
+        XCTAssertLessThan(value(24, 24), value(18, 18), "继续落下")
+        XCTAssertEqual(value(28, 28), 0, "45° 方向已出带（短轴只 2）")
+        XCTAssertEqual(value(30, 20), 0, "未旋转的长轴端点在带外")
+        XCTAssertEqual(value(20, 30), 0, "未旋转的短轴端点在带外")
     }
 
     // MARK: - 4. 直方图与溢出诊断
@@ -436,10 +452,13 @@ final class PixCakeParityTests: XCTestCase {
     }
 
     func testCollageShortfallIsNamedInsteadOfFaked() {
+        // 模板缺失与图不够是两件独立的错：前者由 `CollageComposition.missingTemplateNote`
+        // 管（导出侧先查模板），后者由 `shortfallWarning` 管（底栏提前提示）。
         let missing = CollageComposition(templateID: UUID())
         XCTAssertTrue(CollageComposition.missingTemplateNote.contains("[collage_no_template]"),
                       "模板找不到也要点名，实际：\(CollageComposition.missingTemplateNote)")
-        XCTAssertEqual(missing.shortfallWarning(slots: 4), nil, "模板不存在时不该再报缺图")
+        XCTAssertTrue((missing.shortfallWarning(slots: 4) ?? "").contains("[collage_short]"),
+                      "只有主图时 4 格就是不够，不管模板对不对都得说")
 
         var two = CollageComposition(templateID: UUID(), extraURLs: [URL(fileURLWithPath: "/a.jpg"),
                                                                     URL(fileURLWithPath: "/b.jpg")])

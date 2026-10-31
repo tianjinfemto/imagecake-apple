@@ -240,12 +240,21 @@ struct FaceGeometry: Equatable, Sendable {
 enum RegionRaster {
     /// 偶奇规则填充多边形（扫描线），可选羽化。
     ///
+    /// **入参ring 是归一化坐标**（关键点派生的唇环/眼轮廓都是 0…1），
+    /// 本函数乘上画布尺寸后再扫描。不乘的话症状是"唇色/牙齿美白点了
+    /// 没反应"——一个 0.25…0.75 的多边形在 100px 画布上只能盖住不到一个像素。
+    /// 与 `disk` 的口径不同（disk 拿的是像素半径）：盘是"给定位置与大小"，
+    /// 多边形是"关键点的位置"，两者的坐标空间本来就不一样。
+    ///
     /// 为什么不用 Core Graphics 画：CGContext 的坐标翻转约定在两平台不同
     /// （iOS 的默认上下文是 y 向下还是向上取决于 startPage 时机），
     /// 而"唇内多边形到底盖住哪几行像素"必须是能离线断言的确定性几何。
-    static func polygon(_ ring: [CGPoint], size: PixelSize, feather: Int = 0) -> MaskBuffer {
-        guard ring.count >= 3, size.pixelCount > 0 else {
+    static func polygon(_ normalizedRing: [CGPoint], size: PixelSize, feather: Int = 0) -> MaskBuffer {
+        guard normalizedRing.count >= 3, size.pixelCount > 0 else {
             return MaskBuffer.filled(size, value: 0)
+        }
+        let ring = normalizedRing.map {
+            CGPoint(x: $0.x * CGFloat(size.width), y: $0.y * CGFloat(size.height))
         }
         var bytes = [UInt8](repeating: 0, count: size.pixelCount)
         let ys = ring.map { Double($0.y) }
