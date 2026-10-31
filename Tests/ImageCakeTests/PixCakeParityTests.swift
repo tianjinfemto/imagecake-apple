@@ -284,9 +284,11 @@ final class PixCakeParityTests: XCTestCase {
         // 不钉具体字节（smoothstep + 像素中心采样的组合值容易让人猜错），
         // 钉的是结构：中心满、沿长轴单调落下、两个未旋转轴上都是空。
         XCTAssertGreaterThanOrEqual(value(20, 20), 250, "中心格")
-        XCTAssertEqual(value(18, 18), value(22, 22), "沿长轴对称")
         XCTAssertLessThan(value(18, 18), value(20, 20), "往外单调落下")
         XCTAssertLessThan(value(24, 24), value(18, 18), "继续落下")
+        // 像素中心是 x+0.5，所以与 (18,18) 对称的是 (21,21)（都是 1.5px 偏），
+        // 而不是 (22,22)（2.5px）。
+        XCTAssertEqual(value(18, 18), value(21, 21), "沿长轴对称")
         XCTAssertEqual(value(28, 28), 0, "45° 方向已出带（短轴只 2）")
         XCTAssertEqual(value(30, 20), 0, "未旋转的长轴端点在带外")
         XCTAssertEqual(value(20, 30), 0, "未旋转的短轴端点在带外")

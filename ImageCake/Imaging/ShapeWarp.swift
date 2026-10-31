@@ -94,10 +94,15 @@ enum ShapeWarp {
         var touched = false
 
         for face in faces {
-            touched = touched || applyFaceEdits(&field, size: size, face: face, beauty: beauty)
+            // 绝不能写成 `touched = touched || applyFaceEdits(...)`：`||` 会短路，
+            // 第一张脸一旦生效，后面每张脸的函数调用都被跳过——症状正是
+            // "合影里只磨最大那张脸"，而且只有断言能抓出来。
+            let edited = applyFaceEdits(&field, size: size, face: face, beauty: beauty)
+            touched = touched || edited
         }
         if let body {
-            touched = touched || applyBodyEdits(&field, size: size, body: body, beauty: beauty)
+            let edited = applyBodyEdits(&field, size: size, body: body, beauty: beauty)
+            touched = touched || edited
         }
         guard touched else { return nil }
         field.clampMagnitude()
