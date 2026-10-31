@@ -50,6 +50,20 @@ enum ImageLoader {
         "bay", "cap", "cs1", "dcs", "drf", "eip", "fff", "mfw", "ptx", "rpn",
     ]
 
+    /// 从内存里的字节解一张缩略图给 UI 用（联机拍摄的回片、装饰预览都走这里）。
+    /// 与 `load(url:)` 同一套 ImageIO 与方向转正，只是输入是 Data：两条解图路径
+    /// 写开后，症状会是"相机回片在面板里转了 90°，打开后又是正的"。
+    static func thumbnail(from data: Data, maxEdge: Int) -> CGImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let target = maxEdge > 0 ? maxEdge : 1024
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: max(1, target),
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+    }
+
     static func load(url: URL, maxEdge: Int) async throws -> LoadedImage {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }

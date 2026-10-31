@@ -52,6 +52,13 @@ struct FaceGeometry: Equatable, Sendable {
         static let leftMouthCorner = 308
         static let rightNoseWing = 129
         static let leftNoseWing = 358
+        /// 两条眉毛的**折线**（从眉尾到眉头）。妆容模板的填眉层用它搭带状区域。
+        ///
+        /// 这两张表是 MediaPipe FaceMesh 里通行的眉毛下沿序列。它们只被
+        /// 眉毛一个功能消费：换关键点网络时忘了重映射，症状是"眉色落在眼皮上"，
+        /// 而不是静默错位——因为 `browLines` 的数量不匹配时整层不跑。
+        static let rightBrow = [104, 103, 102, 101, 100, 99, 98, 97]
+        static let leftBrow = [300, 299, 298, 297, 296, 295, 294, 336]
         static let noseTip = 4
         static let noseBridge = 9
         static let chin = 152
@@ -102,6 +109,9 @@ struct FaceGeometry: Equatable, Sendable {
     var underEyes: [UnderEyeRegion]
     /// 法令纹带（两条，左右各一）——祛法令纹的作用区。
     var nasolabialBands: [NasolabialRegion]
+    /// 两条眉毛的折线（归一化，每条 ≥ 2 点）。妆容模板的填眉层把它充成带状。
+    /// 拿不到就是空数组——那一层整段不跑，而不是猜个眉位画上去。
+    var browLines: [[CGPoint]]
 
     // MARK: 派生
 
@@ -197,6 +207,13 @@ struct FaceGeometry: Equatable, Sendable {
             bands = [rightBand, leftBand]
         }
 
+        // 眉毛折线：两条都拿得齐才给（一边缺一边就是半张脸有眉、半张没眉）。
+        var brows: [[CGPoint]] = []
+        if let rightBrow = ring(Index.rightBrow), let leftBrow = ring(Index.leftBrow),
+           rightBrow.count >= 2, leftBrow.count >= 2 {
+            brows = [rightBrow, leftBrow]
+        }
+
         return FaceGeometry(
             irisCenters: [rightIris, leftIris],
             irisRadius: radius,
@@ -218,7 +235,8 @@ struct FaceGeometry: Equatable, Sendable {
             axisX: Double(bounds.midX),
             bounds: bounds,
             underEyes: underEyes,
-            nasolabialBands: bands
+            nasolabialBands: bands,
+            browLines: brows
         )
     }
 
@@ -338,5 +356,56 @@ enum RegionRaster {
         var out = [UInt8](repeating: 0, count: left.count)
         for i in 0 ..< left.count { out[i] = Swift.max(0, left[i] - right[i]) }
         return MaskBuffer(size: a.size, data: Data(out))
+    }
+
+    /// 折线 → 闭合带状多边形（眉线、眼线用）。输入/输出都是**归一化**坐标，
+    /// 可以直接交给 `polygon`。
+    ///
+    /// `halfWidth` 是相对**画面宽**的厚度（与笔刷半径同口径）。法向必须先在
+    /// 像素度量里算再换回归一化：图不是正方形，直接在归一化空间做旋转会把
+    /// 带子拧斜——竖图上的"垂直于眉线"在屏幕上根本不是垂直的。
+    static func band(_ normalizedRing: [CGPoint], halfWidth: Double, size: PixelSize) -> [CGPoint] {
+        guard normalizedRing.count >= 2, size.width > 0, size.height > 0, halfWidth > 0 else { return [] }
+        let w = Double(size.width), h = Double(size.height)
+        let pixels = normalizedRing.map { CGPoint(x: Double($0.x) * w, y: Double($0.y) * h) }
+        var forward: [CGPoint] = []
+        var backward: [CGPoint] = []
+        for i in 0 ..< pixels.count {
+            let prev = pixels[Swift.max(0, i - 1)]
+            let next = pixels[Swift.min(pixels.count - 1, i + 1)]
+            let tx = Double(next.x - prev.x), ty = Double(next.y - prev.y)
+            let length = hypot(tx, ty)
+            guard length > 1e-6 else { continue }
+            // 法向（像素度量下才是真的垂直）。
+            let nx = -ty / length, ny = tx / length
+            let offset = halfWidth * w
+            forward.append(CGPoint(x: (Double(pixels[i].x) + nx * offset) / w,
+                                   y: (Double(pixels[i].y) + ny * offset) / h))
+            backward.append(CGPoint(x: (Double(pixels[i].x) - nx * offset) / w,
+                                    y: (Double(pixels[i].y) - ny * offset) / h))
+        }
+        guard forward.count >= 2 else { return [] }
+        return forward + backward.reversed()
+    }
+
+    /// 取一条闭合眼框里"上脸那一段"的连续弧（eyeshadow / eyeliner 用）。
+    ///
+    /// 判据是 y 不高于虹膜圆心（屏幕坐标 y 向下，所以是"以上"）。必须是
+    /// **连续**一段：按阈值筛点会把下缘的几个点也拾进来，症状是眼影圈住整只眼。
+    static func upperArc(_ normalizedRing: [CGPoint], notAbove irisY: Double) -> [CGPoint] {
+        guard normalizedRing.count >= 3 else { return [] }
+        let flags = normalizedRing.map { Double($0.y) <= irisY }
+        var best: [CGPoint] = []
+        var current: [CGPoint] = []
+        for offset in 0 ..< normalizedRing.count {
+            if flags[offset % normalizedRing.count] {
+                if current.isEmpty { current = [normalizedRing[offset % normalizedRing.count]] }
+                else { current.append(normalizedRing[offset % normalizedRing.count]) }
+                if current.count > best.count { best = current }
+            } else {
+                current = []
+            }
+        }
+        return best.count >= 2 ? best : []
     }
 }

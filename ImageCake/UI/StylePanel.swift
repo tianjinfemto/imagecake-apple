@@ -2,7 +2,8 @@ import CoreGraphics
 import SwiftUI
 import UniformTypeIdentifiers
 
-// 风格面板。三块：滤镜（内置风格 + 导入 .cube）、镜头校正、本地调节。
+// 风格面板。四块：滤镜（内置风格 + 导入 .cube）、镜头校正、本地调节、场景
+// （换天空 / 虚拟打光 / 多帧堆栈）。
 //
 // 与「调色」面板的分工：调色面板是**逐通道数学**（曝光/曲线/HSL/色轮），
 // 这里三块都是"整张图的观感"或"按区域二次调"。像素蛋糕把 70+ 滤镜放在
@@ -27,6 +28,9 @@ struct StylePanel: View {
             filterSection
             lensSection
             localSection
+            // 换天空 / 虚拟打光 / 多帧堆栈：同属"改画面里的光与背景"，
+            // 而且都在这张图定下来之后才跑（顺序见 ImageDocument.render）。
+            ScenePanel().environmentObject(model)
         }
         .fileImporter(isPresented: $showLUTImport,
                       allowedContentTypes: [UTType(filenameExtension: "cube") ?? .data],

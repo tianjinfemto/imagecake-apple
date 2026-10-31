@@ -140,7 +140,7 @@ struct CanvasView: View {
                 .allowsHitTesting(false)
         }
         if isBrushing, brushPoints.count > 1, model.brushTool != .liquify {
-            // 保护/图章拖动时画一条半透明轨迹，让用户看到涂到哪了。
+            // 保护/图章/选区/衣物拖动时画一条半透明轨迹，让用户看到涂到哪了。
             Path { path in
                 let viewPoints = brushPoints.map { viewport.viewPoint($0) }
                 path.addLines(viewPoints)
@@ -241,7 +241,7 @@ struct CanvasView: View {
         switch model.brushTool {
         case .liquify:
             if brushFrom == nil { brushFrom = normalized }
-        case .protection, .cloneStamp, .localMask:
+        case .protection, .cloneStamp, .localMask, .garment:
             brushPoints.append(normalized)
         case .none:
             break
@@ -293,6 +293,11 @@ struct CanvasView: View {
             guard maskPoints.count >= 1 else { return }
             model.setPendingLocalStroke(BrushStroke(points: maskPoints,
                                                     radius: radius, hardness: hardness))
+        case .garment:
+            // 衣物区与保护笔刷同构：只存笔迹，熨不熨由面板上的力度决定。
+            let points = StrokeSampler.resample(brushPoints, minSpacing: radius * 0.5)
+            guard points.count >= 1 else { return }
+            model.addGarmentStroke(BrushStroke(points: points, radius: radius, hardness: hardness))
         case .none:
             break
         }

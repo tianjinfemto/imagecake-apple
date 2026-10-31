@@ -81,6 +81,11 @@ enum ParamSync {
             beauty.darkCircle = source.beauty.darkCircle
             beauty.nasolabial = source.beauty.nasolabial
             out.beauty = beauty
+            // 造型三组跟美肤一起同步：它们都是"改画面里的人"，
+            // 而且都靠关键点定位，逐张重派生。
+            out.makeup = source.makeup
+            out.hair = source.hair
+            out.hand = source.hand
         }
         if groups.contains(.shape) {
             var beauty = out.beauty
@@ -96,11 +101,20 @@ enum ParamSync {
             beauty.neckSlim = source.beauty.neckSlim
             beauty.shoulderLift = source.beauty.shoulderLift
             out.beauty = beauty
+            // 衣物祛褶的力度跟美型一起走：它是"把一块形状平掉"。
+            // 涂的那一块本身同步不了（在 BrushState 里），这是故意的：
+            // 上一张的褶子在左肩，下一张的褶子不会也在左肩。
+            out.garment = source.garment
         }
         if groups.contains(.style) {
             out.filter = source.filter
             out.lens = source.lens
-            // requires 登记的是外部资产（.cube 表），跟着滤镜走。
+            // 虚拟打光是"整张图的观感"，跟滤镜/镜头同组。换天空**不**同步：
+            // 天空区域是逐张图算的资产，把 `sky.enabled` 抄给全批等于给每张
+            // 室内照挂一张假天。要同步天得连区域一起同步，而区域不是参数。
+            out.light = source.light
+            // requires 登记的是外部资产（.cube 表），跟着滤镜走。导入的天不跟着风格跑：
+            // 上面那段里 `out.sky` 故意为空，依赖也不能单独跟着风格走。
             out.requires = source.requires.filter { $0.hasPrefix("lut:") }
         }
         if groups.contains(.background) {

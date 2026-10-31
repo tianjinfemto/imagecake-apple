@@ -21,8 +21,19 @@ struct BrushState: Equatable, Sendable {
     var stamps: [CloneStamp] = []
     /// 保护笔刷。栅格化后 255 = 完全保护（液化不推、图章不盖）。
     var protection: [BrushStroke] = []
+    /// 衣物祛褶的**涂抹区**。它不是"参数"而是历史（和液化同一条理由），
+    /// 所以进 BrushState 而不是 GarmentParameters——预设同步抢不走它，
+    /// 而这是对的：批里另一张衣服褶不在这个位置。
+    var garments: [BrushStroke] = []
 
-    var isEmpty: Bool { liquify.isEmpty && stamps.isEmpty && protection.isEmpty }
+    var isEmpty: Bool { liquify.isEmpty && stamps.isEmpty && protection.isEmpty && garments.isEmpty }
+
+    /// 涂过的衣物区（当前画布下的掩码）。没涂就是 nil，而不是全零掩码——
+    /// 没选区时祛褶整段不跑，并点名 `[no_garment_region]`。
+    func garmentMask(for size: PixelSize) -> MaskBuffer? {
+        guard !garments.isEmpty else { return nil }
+        return StrokeRasterizer.mask(strokes: garments, size: size)
+    }
 
     /// 当前画布下的保护掩码。没涂保护笔刷时是 nil，而不是全零掩码——
     /// 让引擎走「完全没有这回事」那条分支，省掉整张图的逐像素乘法。

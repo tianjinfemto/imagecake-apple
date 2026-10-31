@@ -5,6 +5,9 @@ import SwiftUI
 // 工具与参数存在 EditorModel 而不在这里：画布手势要读它们，面板只是
 // 一个写入口。仿制图章的取样锚点也存 model——画布上拖一下设，面板里
 // 显示状态并给一个清除按钮。
+//
+// 工具排六个而不是四个：衣物区与保护/选区同一个写法（只存笔迹），
+// 但它的参数在另一个面板（祛褶力度在「造型」），所以不能汇到一起去。
 
 struct BrushPanel: View {
     @EnvironmentObject private var model: EditorModel
@@ -149,6 +152,8 @@ struct BrushPanel: View {
             return "保护笔刷：涂过的区域不被液化推动、也不被图章覆盖。先涂保护，再涂液化/图章。"
         case .localMask:
             return "画笔蒙版：涂一笔当作本地调节的选区，再到「风格」面板给它一组参数。选区与参数分两步，因为同一个选区往往会反复改参数。"
+        case .garment:
+            return "衣物区：在要熨的褶子上涂一块，再去「造型」面板推「祛褶」。要涂而不自动：分辨褶子与接缝/图案/腰带阴影需要服装分割，自动会把不该平的地方平掉。"
         }
     }
 
@@ -157,7 +162,8 @@ struct BrushPanel: View {
         let l = brush?.liquify.count ?? 0
         let s = brush?.stamps.count ?? 0
         let p = brush?.protection.count ?? 0
-        return "液\(l) · 章\(s) · 护\(p)"
+        let g = brush?.garments.count ?? 0
+        return "液\(l) · 章\(s) · 护\(p) · 衣\(g)"
     }
 
     private func brushCount(_ kind: EditorModel.BrushKind) -> Int {
@@ -166,7 +172,8 @@ struct BrushPanel: View {
         case .liquify: return brush.liquify.count
         case .stamps: return brush.stamps.count
         case .protection: return brush.protection.count
-        case .all: return brush.liquify.count + brush.stamps.count + brush.protection.count
+        case .garments: return brush.garments.count
+        case .all: return brush.liquify.count + brush.stamps.count + brush.protection.count + brush.garments.count
         }
     }
 }

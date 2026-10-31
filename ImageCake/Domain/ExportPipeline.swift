@@ -3,9 +3,10 @@ import Foundation
 // 导出流水线。
 //
 // 顺序是承诺，不是实现细节（与 ImageDocument.render 同序）：
-//   全分辨率重载 → 几何转正 → 调色 → 皮肤掩码 → 滤镜 → 镜头几何 → 空间滤波
-//   → 美肤 → 区域美化 → 美型预设 → 液化 → 仿制图章 → 修补 → 修复补丁 → 换底色
-//   → 暗角与颗粒 → 面部重绘 → AI 超清 → 证件照排版 → 装饰叠加 → 编码
+//   全分辨率重载 → 几何转正 → 调色 → 皮肤色域分层 → 滤镜 → 镜头几何 → 空间滤波
+//   → 美肤 → 区域美化 → 妆容/手部/头发 → 美型预设 → 液化 → 仿制图章 → 衣物祛褶
+//   → 修补 → 修复补丁 → 换底色 → 换天空 → 虚拟打光 → 暗角与颗粒
+//   → 面部重绘 → AI 超清 → 证件照排版 → 拼图排版 → 装饰叠加 → 编码
 //
 // 预览与导出走同一个 `ImageDocument.render()`，所以笔刷不需要在这里出现：
 // 它们存的是归一化坐标 + 长边比例的半径，在全分辨率画布上重放就是正确位置。
@@ -101,6 +102,11 @@ enum ExportPipeline {
         // 否则“预览里合影每张都磨了、导出只磨了最大那张”。
         working.faceGeometries = document.faceGeometries
         working.bodyAnchors = document.bodyAnchors
+        // 手、天空区域、导入的那张天都是同一类资产：不带过去就是
+        // "预览里手磨了、天换了，导出件里两者都没了"。
+        working.handHulls = document.handHulls
+        working.skyMask = document.skyMask
+        working.skyPhoto = document.skyPhoto
         working.idPhotoSheet = document.idPhotoSheet
         working.collage = document.collage
         if working.patches.contains(where: { $0.reference != working.canvasSize }) {

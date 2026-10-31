@@ -23,6 +23,10 @@ final class EditorModel: ObservableObject {
         case bodyPose
         case faceAttr
         case assembling
+        case hands
+        case sky
+        case stacking
+        case tethering
 
         var title: String {
             switch self {
@@ -36,6 +40,10 @@ final class EditorModel: ObservableObject {
             case .bodyPose: return "正在检测身形"
             case .faceAttr: return "正在识别属性"
             case .assembling: return "正在拼图排版"
+            case .hands: return "正在检测手部"
+            case .sky: return "正在找天空"
+            case .stacking: return "正在堆栈多帧"
+            case .tethering: return "正在等相机回片"
             }
         }
 
@@ -51,6 +59,10 @@ final class EditorModel: ObservableObject {
             case .bodyPose: return "RTMPose 17 点，需先抠图获取人像区域"
             case .faceAttr: return "年龄 + 性别分类，每张脸跑两颗网络"
             case .assembling: return "每张图源都走一遍全分辨率重渲染（不跑重绘/超清），4 格可能是十几秒"
+            case .hands: return "Vision 手部姿态：零权重、双端自带，每张手约 0.1 秒"
+            case .sky: return "从画面顶边做连通生长：不连到顶边的蓝色（裙子、水洼）不会被当成天"
+            case .stacking: return "需要同一机位的 2 张以上连拍；先做整数平移对齐，再按模式堆叠"
+            case .tethering: return "相机 10 秒不回片会报错而不是一直转圈"
             }
         }
     }
@@ -125,6 +137,19 @@ final class EditorModel: ObservableObject {
     }
     /// 最近一次 sidecar 读写结果（面板原样显示，不写"保存成功"这种废话）。
     @Published private(set) var libraryNote = ""
+
+    // MARK: - 联机拍摄
+
+    /// 系统列出的视频设备（含外接相机/采集卡）。
+    @Published private(set) var tetherDevices: [TetheredDevice] = []
+    @Published var tetherDeviceID: String? = nil
+    @Published var tetherSettings = TetherSettings()
+    /// 联机作业的报告与点名（面板与底栏共用，不弹完即烧）。
+    @Published private(set) var tetherNote = ""
+    @Published private(set) var tetherConnected = false
+    /// 最近一张回片（面板上看得见的"拍到了"证据，也是进度反馈）。
+    @Published private(set) var tetherLastShot: CGImage?
+    private let capture = TetherCapture()
 
     let store: ModelStore
     private let ort = ORTEngine.shared
@@ -237,6 +262,109 @@ final class EditorModel: ObservableObject {
         Task { await open(url: queue[0].url) }
     }
 
+    /// 刷新设备列表。授权被拒与真的没设备是两件事，分开点名。
+    func refreshTetherDevices() async {
+        busy = .tethering
+        defer { busy = nil }
+        guard await TetherCapture.requestAccess() else {
+            tetherDevices = []
+            tetherNote = TetherCapture.CaptureError.denied.errorDescription ?? "[no_camera]"
+            return
+        }
+        let found = await Task.detached(priority: .userInitiated) { TetherCapture.discover() }.value
+        tetherDevices = found
+        if tetherDevices.isEmpty {
+            tetherNote = TetherPlan.missingNote(devices: found)
+        } else {
+            let usable = tetherDevices.filter(\.isUsable).count
+            tetherNote = "\(tetherDevices.count) 台设备，可用 \(usable) 台"
+                + (usable == 0 ? " · \(TetherPlan.missingNote(devices: tetherDevices))" : "")
+        }
+        // 没选过设备就自动拿首选那台（排序是稳定的，不会每次换一个）。
+        if tetherDeviceID == nil || tetherDevices.first(where: { $0.id == tetherDeviceID }) == nil {
+            tetherDeviceID = TetherPlan.pickDevice(from: tetherDevices, preferred: tetherDeviceID)?.0.id
+        }
+    }
+
+    /// 接上选中的设备（跑 session）。startRunning 是阻塞调用，所以丢后台。
+    func connectTether() async {
+        guard let id = tetherDeviceID, let device = tetherDevices.first(where: { $0.id == id }) else {
+            tetherNote = "[no_camera] 先选一台设备"
+            return
+        }
+        busy = .tethering
+        defer { busy = nil }
+        let capture = self.capture
+        do {
+            try await Task.detached(priority: .userInitiated) { try capture.configure(deviceID: id) }.value
+            tetherConnected = true
+            tetherNote = "已接上：\(device.title)"
+        } catch {
+            tetherConnected = false
+            tetherNote = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    func disconnectTether() {
+        capture.stop()
+        tetherConnected = false
+        tetherNote = "已断开相机"
+    }
+
+    /// 拍一或 N 张（连拍走 `TetherPlan.queue`）。每张落盘后更新缩略图，
+    /// 第一拍（且开了"拍完进编辑"）直接进编辑器。
+    func shootTetherBurst(to directory: URL?) async {
+        guard tetherConnected else { await connectTether(); guard tetherConnected else { return } }
+        busy = .tethering
+        defer { busy = nil }
+        let settings = tetherSettings
+        let plan = TetherPlan.queue(settings: settings)
+        var notes = plan.notes
+        var saved: [URL] = []
+        var failures: [String] = []
+        let capture = self.capture
+        for shot in plan.shots {
+            if shot.waitSeconds > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(shot.waitSeconds * 1_000_000_000))
+            }
+            do {
+                let data = try await Task.detached(priority: .userInitiated) { try capture.capture() }.value
+                let stamp = Self.tetherStamp()
+                if let directory {
+                    let url = directory.appendingPathComponent(
+                        TetherPlan.fileName(sequence: shot.sequence, stamp: stamp, ext: "jpg"))
+                    do {
+                        try data.write(to: url, options: .atomic)
+                        saved.append(url)
+                    } catch {
+                        failures.append("写不进 \(url.lastPathComponent)")
+                    }
+                }
+                // 回片缩略图：主线程不解图，512 档也是几毫秒的 ImageIO 工作。
+                let shot = await Task.detached(priority: .userInitiated) {
+                    ImageLoader.thumbnail(from: data, maxEdge: 512)
+                }.value
+                tetherLastShot = shot
+                if settings.openInEditor, let url = saved.last {
+                    await open(url: url)
+                }
+            } catch {
+                failures.append((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
+                break      // 相机不回片时不要接着把剩下的 N 张都卡完
+            }
+        }
+        if saved.isEmpty, failures.isEmpty { failures.append("没指定落盘目录，也没拍成任何一张") }
+        tetherNote = "拍了 \(saved.count)/\(plan.shots.count) 张" + (failures.isEmpty ? "" : " · \(failures.prefix(2).joined(separator: "；"))")
+        notes.forEach { tetherNote += " · \($0)" }
+    }
+
+    /// 时戳到秒。同一秒内的两张靠序号后缀区分（见 `TetherPlan.fileName`）。
+    private static func tetherStamp() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        return formatter.string(from: Date())
+    }
+
     // MARK: - 打开
 
     func open(url: URL) async {
@@ -337,6 +465,7 @@ final class EditorModel: ObservableObject {
         case .liquify: doc.brush.liquify = []
         case .stamps: doc.brush.stamps = []
         case .protection: doc.brush.protection = []
+        case .garments: doc.brush.garments = []
         case .all: doc.brush = BrushState()
         }
         document = doc
@@ -346,12 +475,13 @@ final class EditorModel: ObservableObject {
     }
 
     enum BrushKind: CaseIterable {
-        case liquify, stamps, protection, all
+        case liquify, stamps, protection, garments, all
         var title: String {
             switch self {
             case .liquify: return "液化笔迹"
             case .stamps: return "图章笔迹"
             case .protection: return "保护笔刷"
+            case .garments: return "衣物区"
             case .all: return "全部笔刷"
             }
         }
@@ -360,7 +490,7 @@ final class EditorModel: ObservableObject {
     /// 画布上的当前工具。.none 时单指拖走框选（智能消除用），
     /// 其余几个走各自的笔刷落笔。
     enum BrushTool: CaseIterable {
-        case none, liquify, cloneStamp, protection, localMask
+        case none, liquify, cloneStamp, protection, localMask, garment
         var title: String {
             switch self {
             case .none: return "无"
@@ -368,6 +498,7 @@ final class EditorModel: ObservableObject {
             case .cloneStamp: return "图章"
             case .protection: return "保护"
             case .localMask: return "选区"
+            case .garment: return "衣物"
             }
         }
         var icon: String {
@@ -377,6 +508,7 @@ final class EditorModel: ObservableObject {
             case .cloneStamp: return "stamp"
             case .protection: return "shield"
             case .localMask: return "circle.dashed"
+            case .garment: return "tshirt"
             }
         }
     }
@@ -901,6 +1033,158 @@ final class EditorModel: ObservableObject {
         } catch {
             alert = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
+    }
+
+    /// 涂一笔衣物区（祛褶只在这里生效）。与保护/选区同一类：只存笔迹。
+    func addGarmentStroke(_ stroke: BrushStroke) {
+        mutateDocument { $0.brush.garments.append(stroke) }
+        commitHistoryNow()
+        scheduleRender()
+        status = "衣物区 \(document?.brush.garments.count ?? 0) 笔"
+    }
+
+    func clearGarmentStrokes() {
+        mutateDocument { $0.brush.garments = [] }
+        commitHistoryNow()
+        scheduleRender()
+        status = "已清除衣物区"
+    }
+
+    // MARK: - AI：手部 / 天空 / 多帧堆栈
+
+    /// 检测手（Vision 手部姿态，零权重）。凸包存归一化坐标，
+    /// 所以预览档算的点在全分辨率导出上直接能用。
+    func runHandPose() async {
+        guard let doc = document else { return }
+        busy = .hands
+        defer { busy = nil }
+        let bytes = await Task.detached(priority: .userInitiated) {
+            doc.render(applyMask: false).rgba8()
+        }.value
+        let hands = await Task.detached(priority: .userInitiated) {
+            VisionSupport.hands(in: bytes)
+        }.value
+        let hulls = hands.map { $0.points }
+        mutateDocument { $0.handHulls = hulls }
+        status = hulls.isEmpty
+            ? "[no_hand] 没检测到手（画面里可能没有手，或手指被遮）"
+            : "手部：\(hulls.count) 只 · \(hulls.map(\.count).reduce(0, +)) 个关节点"
+    }
+
+    func clearHandHulls() {
+        mutateDocument { $0.handHulls = [] }
+        scheduleRender()
+        status = "已清除手部区域"
+    }
+
+    /// 找天空（从顶边连通生长）。结果存为资产，与抠图同一性质。
+    func detectSky() async {
+        guard let doc = document else { return }
+        busy = .sky
+        defer { busy = nil }
+        let display = await Task.detached(priority: .userInitiated) {
+            doc.render(applyMask: false)
+        }.value
+        let weights = await Task.detached(priority: .userInitiated) {
+            SkyMask.build(display, personMask: doc.personMask)
+        }.value
+        guard weights.count == display.size.pixelCount, weights.contains(where: { $0 > 0.5 }) else {
+            mutateDocument { $0.skyMask = nil }
+            status = "[no_sky_mask] 没找到与顶边相连的天空区（不连顶边的蓝色不会被当成天）"
+            return
+        }
+        let bytes = Data(weights.map { UInt8((Swift.min(1.0, Double($0)) * 255).rounded()) })
+        mutateDocument { $0.skyMask = MaskBuffer(size: display.size, data: bytes) }
+        let share = Double(weights.filter { $0 > 0.5 }.count) / Double(max(1, display.size.pixelCount))
+        // 把"为什么不是发丝级"直接写在结果里：天空区域一直走色域+连通生长的
+        // 回退路径（分割权重不在清单里），不标就会被当成 AI 分割。
+        status = String(format: "天空：占画面 %.0f%% · %d×%d · [fallback:sky-colour-locus]",
+                        share * 100, display.size.width, display.size.height)
+    }
+
+    func clearSkyMask() {
+        mutateDocument { $0.skyMask = nil }
+        scheduleRender()
+        status = "已清除天空区域"
+    }
+
+    /// 导入一张天。名字进参数、字节进文档（与 `.cube` 同一套处理）。
+    func importSky(from url: URL) async {
+        guard let doc = document else { return }
+        busy = .sky
+        defer { busy = nil }
+        do {
+            let name = try SkyLibrary.install(from: url)
+            let photo = await SkyLibrary.load(name: name, canvas: doc.canvasSize)
+            guard let photo else {
+                alert = "[no_sky:\(name)] 存下了但读不出来（格式不支持或文件坏了）"
+                return
+            }
+            mutateDocument { item in
+                item.skyPhoto = photo
+                item.params.sky.mode = .photo
+                item.params.sky.sourceName = name
+                var deps = item.params.requires.filter { !$0.hasPrefix("sky:") }
+                deps.append("sky:\(name)")
+                item.params.requires = deps
+            }
+            status = "已导入天空：\(name)"
+        } catch {
+            alert = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    /// 多帧堆栈（AI 慢门）。取代之前的当前图：堆出来的就是一张新图，
+    /// 后续所有调色/人像都要在它上面做，所以直接换 document 而不是另存一份。
+    func runLongExposure(with urls: [URL], mode: StackMode) async {
+        guard let doc = document else { return }
+        busy = .stacking
+        defer { busy = nil }
+        // 主图 + 选中的其他帧。主图排在最前，所以第一帧就是参考帧。
+        var sources: [URL] = []
+        if let mine = doc.sourceURL { sources.append(mine) }
+        sources += urls.filter { url in url != doc.sourceURL }
+        guard sources.count >= 2 else {
+            alert = "[frames_short] 堆栈需要同一机位的至少 2 张图（当前 \(sources.count) 张）"
+            return
+        }
+        var frames: [DisplayImage] = []
+        var skipped: [String] = []
+        for url in sources {
+            guard let loaded = try? await ImageLoader.load(url: url, maxEdge: 2048) else {
+                skipped.append(url.lastPathComponent)
+                continue
+            }
+            frames.append(ToneEngine.render(loaded.linear, params: EditParameters()))
+        }
+        guard frames.count >= 2 else {
+            alert = "[frames_short] 能读出来的图不足 2 张：\(skipped.prefix(3).joined(separator: ", "))"
+            return
+        }
+        guard let result = LongExposureEngine.stack(frames, mode: mode) else {
+            alert = "[stack_mismatch] 这些图尺寸不一致，堆栈只做平移对齐，不会静默重采样"
+            return
+        }
+        guard let linear = LinearImage(display: result.image) else {
+            alert = "[stack_failed] 堆栈结果转不回线性档"
+            return
+        }
+        let stem = doc.sourceURL?.deletingPathExtension().lastPathComponent ?? "stack"
+        mutateDocument { item in
+            item.linear = linear
+            item.maskReference = linear.size
+            item.personMask = nil
+            item.patches = []
+            item.brush = BrushState()
+            item.faceGeometries = []
+            item.bodyAnchors = nil
+            item.handHulls = []
+            item.skyMask = nil
+            item.skyPhoto = nil
+        }
+        exportNotes = [LongExposureEngine.report(result)] + (skipped.isEmpty ? [] : ["[stack_skipped] \(skipped.count) 张读不了")]
+        await renderNow()
+        status = "\(result.frames) 帧堆栈完成（\(mode.title)）· \(stem)"
     }
 
     // MARK: - 批量

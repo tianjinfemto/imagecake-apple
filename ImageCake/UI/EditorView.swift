@@ -14,6 +14,7 @@ struct EditorView: View {
     @State private var showModels = false
     @State private var showExport = false
     @State private var showLibrary = false
+    @State private var showTether = false
     @State private var showPresetImport = false
     @State private var showPresetExport = false
     @State private var presetPayload: ExportFile?
@@ -76,6 +77,10 @@ struct EditorView: View {
         .sheet(isPresented: $showLibrary) {
             // 素材库要宽度，所以是 sheet 而不是检查器里的第七个标签页。
             LibraryPanel { showLibrary = false }.environmentObject(model)
+        }
+        .sheet(isPresented: $showTether) {
+            // 联机同理：设备列表 + 快门参数 + 回片预览，一栏 300pt 装不下。
+            TetherPanel { showTether = false }.environmentObject(model)
         }
         .overlay {
             if let busy = model.busy {
@@ -257,6 +262,12 @@ struct EditorView: View {
                 showLibrary = true
             } label: {
                 Label("图库", systemImage: "square.grid.2x2")
+            }
+
+            Button {
+                showTether = true
+            } label: {
+                Label("联机", systemImage: "camera")
             }
 
             Button {

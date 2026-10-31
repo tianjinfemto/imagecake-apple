@@ -57,6 +57,11 @@ targets:
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.photography
         INFOPLIST_KEY_NSPhotoLibraryUsageDescription: 选择照片进行精修，全部计算在本机完成。
         INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription: 把精修结果保存回相册。
+        # 联机拍摄：AVFoundation 枚举/接入相机必需。缺这一项不是"功能不能用"
+        # 而是启动时直接被系统杀掉，所以必须在工程里固定，不能靠文档提醒。
+        # 注意：iPad 上的 USB 外接相机还需要 Apple 的 external-camera
+        # entitlement（未签名侧载拿不到）；面板拿 `[no_camera]` 点名这一点。
+        INFOPLIST_KEY_NSCameraUsageDescription: 联机拍摄：接上相机后立即拍一张，并把回片送进编辑器。
         INFOPLIST_KEY_UILaunchScreen_Generation: "YES"
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: "YES"
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"

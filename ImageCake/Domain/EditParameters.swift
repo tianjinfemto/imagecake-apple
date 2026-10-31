@@ -96,6 +96,16 @@ public struct EditParameters: Equatable, Sendable {
     public var filter = FilterParameters()
     public var lens = LensParameters()
 
+    // —— 造型与场景（本仓第二批扩展组，见 SceneParameters） ——
+    // 依赖各不相同（关键点 / Vision 姿态 / 涂抹选区 / 区域生长 / 亮度重建），
+    // 所以各自一个闸门，而不是合成一个"场景开关"。
+    public var makeup = MakeupParameters()
+    public var hair = HairParameters()
+    public var hand = HandParameters()
+    public var garment = GarmentParameters()
+    public var sky = SkyParameters()
+    public var light = LightParameters()
+
     // —— 交付端 ——
     public var faceRestore: Double = 0     // 0...100，只挂导出
     public var superRes: Int = 0           // 0/2/4，只挂导出
@@ -136,9 +146,17 @@ public struct EditParameters: Equatable, Sendable {
     /// 人像三组是否全关。皮肤/美型活在 ToneEngine 之外，所以单独谓词。
     public var isBeautyNeutral: Bool { beauty.isNeutral }
 
+    /// 造型与场景六组是否全关。它们都不在 ToneEngine 的逐像素循环里，
+    /// 而且各自要等不同的资产（脸、手、选区），所以不能汇成一个谓词。
+    public var isSceneNeutral: Bool {
+        makeup.isNeutral && hair.isNeutral && hand.isNeutral
+            && garment.isNeutral && sky.isNeutral && light.isNeutral
+    }
+
     public var isNeutral: Bool {
         isLinearNeutral && isDisplayNeutral && isSpatialNeutral
             && beauty.isNeutral && filter.isNeutral && lens.isNeutral
+            && isSceneNeutral
             && faceRestore == 0 && superRes == 0
     }
 
@@ -168,6 +186,12 @@ public struct EditParameters: Equatable, Sendable {
         beauty.clamp()
         filter.clamp()
         lens.clamp()
+        makeup.clamp()
+        hair.clamp()
+        hand.clamp()
+        garment.clamp()
+        sky.clamp()
+        light.clamp()
         faceRestore = faceRestore.clamped(to: 0 ... 100)
         if ![0, 2, 4].contains(superRes) { superRes = 0 }
     }
@@ -205,6 +229,8 @@ extension EditParameters: Codable {
         case bgEnabled = "bg_enabled", bgR = "bg_r", bgG = "bg_g", bgB = "bg_b", bgBlur = "bg_blur"
         case defringe
         case beauty, filter, lens
+        // 造型与场景六组（同一待遇：读旧预设缺键就全关）。
+        case makeup, hair, hand, garment, sky, light
         case faceRestore = "face_restore"
         case superRes = "super_res"
         case presetVersion = "preset_version"
@@ -224,6 +250,9 @@ extension EditParameters: Codable {
         // 三组嵌套键。读旧文件缺它们 → 落出厂值（全关）；写出去给旧程序读会被
         // 点名为未知键，这是故意的（见 BeautyParameters 顶部注释）。
         "beauty", "filter", "lens",
+        // 造型与场景六组。与上面三组同理：它们是本仓扩展，对方读到会点名为
+        // 未知键，而不是猜这些值是什么意思。
+        "makeup", "hair", "hand", "garment", "sky", "light",
         "face_restore", "super_res", "preset_version", "requires"
     ]
 
@@ -270,6 +299,12 @@ extension EditParameters: Codable {
         beauty = try c.decodeIfPresent(BeautyParameters.self, forKey: .beauty) ?? beauty
         filter = try c.decodeIfPresent(FilterParameters.self, forKey: .filter) ?? filter
         lens = try c.decodeIfPresent(LensParameters.self, forKey: .lens) ?? lens
+        makeup = try c.decodeIfPresent(MakeupParameters.self, forKey: .makeup) ?? makeup
+        hair = try c.decodeIfPresent(HairParameters.self, forKey: .hair) ?? hair
+        hand = try c.decodeIfPresent(HandParameters.self, forKey: .hand) ?? hand
+        garment = try c.decodeIfPresent(GarmentParameters.self, forKey: .garment) ?? garment
+        sky = try c.decodeIfPresent(SkyParameters.self, forKey: .sky) ?? sky
+        light = try c.decodeIfPresent(LightParameters.self, forKey: .light) ?? light
         faceRestore = try c.decodeIfPresent(Double.self, forKey: .faceRestore) ?? faceRestore
         superRes = try c.decodeIfPresent(Int.self, forKey: .superRes) ?? superRes
         presetVersion = try c.decodeIfPresent(Int.self, forKey: .presetVersion) ?? presetVersion
@@ -306,6 +341,12 @@ extension EditParameters: Codable {
         try c.encode(beauty, forKey: .beauty)
         try c.encode(filter, forKey: .filter)
         try c.encode(lens, forKey: .lens)
+        try c.encode(makeup, forKey: .makeup)
+        try c.encode(hair, forKey: .hair)
+        try c.encode(hand, forKey: .hand)
+        try c.encode(garment, forKey: .garment)
+        try c.encode(sky, forKey: .sky)
+        try c.encode(light, forKey: .light)
         try c.encode(faceRestore, forKey: .faceRestore)
         try c.encode(superRes, forKey: .superRes)
         try c.encode(presetVersion, forKey: .presetVersion)

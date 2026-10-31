@@ -13,7 +13,9 @@ import Foundation
 // 渲染顺序（与 imagecake 的链同序，只保留可验证的阶段）：
 //   几何转正 → [老照片] → 线性调色 → 显示域调色 → [本地调节] → [皮肤掩码]
 //   → [滤镜/LUT] → [镜头畸变、色差] → 降噪 → 锐化 → [美肤] → [五官区域美化]
-//   → [美型预设形变] → 手动液化 → 仿制图章 → 修补 → 修复补丁 → 换底色 → [暗角、颗粒]
+//   → [妆容模板] → [手部] → [头发] → [美型预设形变] → 手动液化 → 仿制图章
+//   → [衣物祛褶] → 修补 → 修复补丁 → 换底色 → [换天空] → [虚拟打光]
+//   → [暗角、颗粒]
 //
 // 几个位置的硬理由：
 //   · 几何最先：它改画布尺寸，之后的归一化坐标（笔迹/遮罩/关键点）才都是
@@ -92,6 +94,18 @@ struct ImageDocument: Sendable {
     /// 拼图排版。同样只挂导出：预览看单张，拼图是"一次出片"而不是一个开关。
     var collage: CollageComposition? = nil
 
+    /// 手部凸包（归一化坐标，每组一只手的关节点）。由"检测手部"写入；
+    /// 空 = 没测过或没测到，此时手部美化整段不跑并点名 `[no_hand]`。
+    var handHulls: [[CGPoint]] = []
+
+    /// 天空区域（画布尺寸）。与 personMask 同一性质：跑一次得到的资产，
+    /// 不跟着参数重算。nil = 还没检测，此时换天空不跑并点名 `[no_sky_mask]`。
+    var skyMask: MaskBuffer? = nil
+
+    /// 导入的那张天（已 cover-fit 到当前画布）。与 `.cube` 表同一待遇：
+    /// 只存名字在参数里，字节由编辑器读盘后放这里，预览与导出共用。
+    var skyPhoto: DisplayImage? = nil
+
     var canvasSize: PixelSize { linear.size }
     var hasPersonMask: Bool { personMask != nil }
 
@@ -124,6 +138,31 @@ struct ImageDocument: Sendable {
         }
         if !beauty.isSkinNeutral, personMask == nil, faceGeometries.isEmpty {
             notes.append("[no_constraint] 没有 α 也没有关键点：皮肤只按色域判，暖色背景会被连进去")
+        }
+        // 造型与场景各组：缺的是哪个资产就说哪个，不拿"没反应"交差。
+        if !makeup.isNeutral, faceGeometries.isEmpty {
+            notes.append("[no_landmarks] 没检测人脸关键点：妆容模板未生效")
+        } else if !makeup.isNeutral, MakeupEngine.look(id: makeup.styleID) == nil {
+            notes.append("[no_makeup:\(makeup.styleID)] 找不到这个妆容模板")
+        }
+        if !hair.isNeutral, faceGeometries.isEmpty {
+            notes.append("[no_landmarks] 没检测人脸关键点：头发美化未生效（发区靠脸定位）")
+        }
+        if !hand.isNeutral, handHulls.isEmpty {
+            notes.append("[no_hand] 没检测到手：手部美化未生效（Vision 手部姿态，零权重）")
+        }
+        if !garment.isNeutral, brush.garments.isEmpty {
+            notes.append("[no_garment_region] 没涂衣物区：祛褶要先在画面上涂一块（全自动需要服装分割权重）")
+        }
+        if !sky.isNeutral, skyMask == nil {
+            notes.append("[no_sky_mask] 还没检测天空：换天空未生效")
+        } else if !sky.isNeutral, sky.mode == .photo, skyPhoto == nil, !sky.sourceName.isEmpty {
+            notes.append("[no_sky:\(sky.sourceName)] 找不到导入的那张天，已整段跳过而不是拿渐变冒充")
+        }
+        if !light.isNeutral {
+            // 打光不需要资产，但它是"没结构可打"时静默不动的唯一一组，
+            // 所以要给一条能说清的提示（全图抹平后没有梯度 = 一张灰纸）。
+            notes.append("[relight] 虚拟打光是梯度近似：平坦无结构的区域不会有任何变化")
         }
         if params.bgEnabled, personMask == nil {
             notes.append("[no_mask] 未抠图，换底色被跳过")
@@ -239,6 +278,24 @@ struct ImageDocument: Sendable {
             display = RegionEnhance.apply(display, geometries: faceGeometries, beauty: params.beauty)
         }
 
+        // 妆容模板：跟区域美化同一层、同一依赖（关键点），所以紧跟其后。
+        // 它在祛黑眼圈/法令纹之后：妆是"往上叠东西"，专项瑕疵是"去掉不该有的差"，
+        // 顺序反了会把刚填平的瑕疵又盖一层颜色。
+        if !params.makeup.isNeutral {
+            display = MakeupEngine.apply(display, geometries: faceGeometries, makeup: params.makeup)
+        }
+
+        // 手部与头发：都是"靠另一个区域定位的人像修改"，排在美型形变之前——
+        // 形变会搬运像素，先推脸再磨手会让两者用的区域不是同一块画面。
+        if !params.hand.isNeutral, !handHulls.isEmpty {
+            let weights = HandMask.build(size: display.size, hulls: handHulls, pixels: display.pixels)
+            display = HandEngine.apply(display, weights: weights, hands: params.hand)
+        }
+        if !params.hair.isNeutral, let bounds = faceGeometry?.bounds {
+            let weights = HairMask.build(display, faceBounds: bounds, personMask: personMask)
+            display = HairEngine.apply(display, weights: weights, hair: params.hair)
+        }
+
         // 形变类：美型预设 → 手动液化 → 仿制图章。
         // 预设排在手动之前：手动笔迹是用户“对着当前画面推”的结果，
         // 它必须是最后一位挪像素的人；保护掩码三者共用，只栅格化一次。
@@ -254,6 +311,14 @@ struct ImageDocument: Sendable {
             if !brush.stamps.isEmpty {
                 display = CloneStampEngine.apply(display, stamps: brush.stamps, protection: protectionMask)
             }
+        }
+
+        // 衣物祛褶：跟在图章之后、修补之前。它和液化/图章一样是"对着当前画面
+        // 涂一块"的历史操作，所以必须待在同一族里——放在修复补丁之后会让
+        // 用户刚熨平的地方又被补丁贴回褶纹。
+        if !params.garment.isNeutral, let garmentMask = brush.garmentMask(for: display.size) {
+            display = GarmentEngine.apply(display, weights: SkinMask.weights(garmentMask, size: display.size),
+                                          garment: params.garment)
         }
 
         // 修补笔迹（同图取样）：在图章之后、补丁之前。图章和修补都是
@@ -282,6 +347,22 @@ struct ImageDocument: Sendable {
 
         if applyMask, params.bgEnabled, let mask = personMask {
             display = Self.replaceBackground(display: display, mask: mask, params: params)
+        }
+
+        // 换天空：在换底色之后（两者都在背景层动手，但天空的掩码更局部）。
+        // 没检测到天空、或没读到导入的那张天 → 整段不跑，不拿渐变冒充。
+        if !params.sky.isNeutral, let skyMask = skyMask {
+            let weights = SkinMask.weights(skyMask.resized(to: display.size), size: display.size)
+            if params.sky.mode == .gradient || display.size == skyPhoto?.size {
+                display = SkyEngine.apply(display, weights: weights, sky: params.sky, photo: skyPhoto)
+            }
+        }
+
+        // 虚拟打光与暗角、颗粒一起属于输出层：打光要在画面里的东西都定下来之后
+        // 再加（否则磨皮会把刚加的方向对比又抹平），而它必须在暗角之前——
+        // 暗角是"四角变暗"，跟在新光后面会把刚建立的方向关系抹平。
+        if !params.light.isNeutral {
+            display = RelightEngine.apply(display, light: params.light)
         }
 
         // 暗角与颗粒：输出层，最后一道。
