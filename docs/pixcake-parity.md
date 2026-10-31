@@ -117,7 +117,8 @@
 | 新增离线断言（两轮累计 46 + 27 格） | 上一轮 46 格（皮肤色域/频率分离/对立色往返/.cube 全链路/镜头与颗粒/证件照/ParamSync/文档级接线）**+ 本轮 27 格**（`PixCakeParityTests`）：逐脸位移场与区域掩码（第二张脸真的动、单脸时另一张逐比特不变）、皮肤逐脸分层、黑眼圈/法令纹的位置派生与"只抬不压 / 只填细暗线不碰低频"、旋转椭圆盘逐字数值、直方图与 8bit 编码同口径（含越界值）、抽样步长、溢出叠层双色、拼图三种适配与满铺不露底色、`[collage_*]` 四套点名、sidecar 命名/重名冲突/坏文件拒收/未来版本拒收、素材库状态派生与筛选、`dark_circle`/`nasolabial` 预设往返与出厂为关 |
 | 文档级"缺件必须点名" | `[no_landmarks]` / `[no_pose]` / `[no_lut:名字]` / `[no_constraint]` / `[no_face_box]` / `[id_photo]` / `[id_photo_empty]` / `[clipping]` / `[out_of_range]` / `[collage]` / `[collage_short]` / `[collage_failed]` / `[collage_no_template]` / `[sidecar_conflict]` / `[no_scope]` 都有对应断言或报告落点 |
 | 镜像预验证 | 本轮无 Swift 工具链，因此把"下睑椭圆/法令纹带派生、黑眼圈亮度场、法令纹频率门限、旋转椭圆盘"逐行镜像到 Python 跑出实际数值，断言阈值与比较方向全按镜像结果回填（包括"中格 251 而不是 255"这类靠猜必错的数量） |
-| **仍未做** | 真实编译与全量回归必须在 CI 上跑（本机无 Swift 工具链）；AI 美型/磨皮的主观效果没有真机人眼验证；关键点索引表照 MediaPipe 478，**换网络需重映射**（`FaceGeometry.from` 会因数量校验失败返回 nil，不会静默错位） |
+| **真实回归进度** | 本轮已跑过五轮 macOS + iOS 双端全量：从"整个测试目标编不过"一路到 **231 格中 229 格绿**。最后两处（逐脸形变、旋转椭圆对称格）的修正在 `e5d94d0`，**尚未被 CI 验到**：紧接着的几次 run 在分配 runner 前就失败了（1–2 秒、零步骤），check-run 注释是 `The job was not started because recent account payments have failed or your spending limit needs to be increased` —— 账户额度/付款问题，不是代码问题（macOS 分钟按 5× 计入，本轮跑得太密）。额度恢复后重跑即可。 |
+| **仍未做** | 本轮新代码的**主观效果**没有真机人眼验证；关键点索引表照 MediaPipe 478，**换网络需重映射**（`FaceGeometry.from` 会因数量校验失败返回 nil，不会静默错位）；逐脸不同力度、皮肤分割权重、妆容模板与平台缺口见上表与 §7 |
 
 ## 7. 下一步（按"补一层就能拿到最多价值"排序）
 
