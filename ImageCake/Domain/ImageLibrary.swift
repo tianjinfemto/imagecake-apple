@@ -54,8 +54,10 @@ struct LibraryItem: Identifiable, Equatable, Sendable {
 }
 
 /// 筛选条件。全部/未修/已修/已出片 四档，对应商业出片的"这批还剩几张"。
-enum LibraryFilter: String, Equatable, Sendable, CaseIterable, Codable {
+enum LibraryFilter: String, Equatable, Sendable, CaseIterable, Codable, Identifiable {
     case all, unedited, edited, exported
+
+    var id: String { rawValue }
 
     var title: String {
         switch self {

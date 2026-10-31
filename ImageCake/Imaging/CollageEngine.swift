@@ -148,8 +148,14 @@ enum CollageEngine {
         for (slot, image) in zip(template.slots, images) {
             let rect = PixelRect.fromNormalized(slot, in: canvasSize)
             guard !rect.isEmpty else { continue }
-            let fitted = fit(image, to: rect, mode: template.fit)
-            guard fitted.size == rect.size else { continue }
+            var fitted = fit(image, to: rect, mode: template.fit)
+            // 兼容取整缝：3 格模板在 100px 宽上会算出 33/34/33，最后一格的
+            // fit 可能差一个像素。这里补一次而不是丢弃 —— 丢弃的症状是
+            // "那一格露出了底色"，比多缩一个像素难查得多。
+            if fitted.size != rect.size {
+                fitted = fitted.resized(to: rect.size)
+            }
+            guard fitted.data.count >= rect.size.pixelCount * 4 else { continue }
             fitted.data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
                 let src = raw.bindMemory(to: UInt8.self)
                 for y in 0 ..< rect.height {

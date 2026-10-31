@@ -38,13 +38,17 @@ enum LensEngine {
     }
 
     /// splitmix64 风格的整数混合 → [−1, 1]。同 (x, y, seed) 永远同值。
+    ///
+    /// 写回正确的 splitmix64：上一次的版本把 `>>` 写成了不存在的中缀 `^>>`
+    /// （直接编不过）。右移必须与异或分步写 —— `value ^ value >> k` 里
+    /// `>>` 优先级更高，与 C 的写法同语义；混起来写就变成另一个哈希。
     static func hashNoise(x: Int, y: Int, seed: UInt64 = 0) -> Double {
         var value = UInt64(bitPattern: Int64(x)) &* 0x9E37_79B9_7F4A_7C15
-        value = value ^+ (UInt64(bitPattern: Int64(y)) &* 0xC2B2_AE3D_27D4_EB4F)
-        value = value ^+ seed
-        value = (value ^>> 30) &* 0xBF58_476D_1CE4_E5B9
-        value = (value ^>> 27) &* 0x94D0_49BB_1331_11EB
-        value = value ^>> 31
+        value = value &+ (UInt64(bitPattern: Int64(y)) &* 0xC2B2_AE3D_27D4_EB4F)
+        value = value &+ seed
+        value = (value ^ (value >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        value = (value ^ (value >> 27)) &* 0x94D0_49BB_1331_11EB
+        value = value ^ (value >> 31)
         return Double(value) / Double(UInt64.max) * 2 - 1
     }
 

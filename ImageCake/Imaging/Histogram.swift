@@ -103,8 +103,10 @@ enum HistogramBuilder {
         Int((Swift.min(Swift.max(value, 0), 1) * 255).rounded())
     }
 
-    private static func clamped(_ value: Float) -> Double {
-        Double(Swift.min(Swift.max(value, 0), 1))
+    /// 亮度按 Float 算（`ColorMath.luma` 的入参就是 Float）：这里不再转一道
+    /// Double，否则编译不过，而与 rgba8 的差别只在最终 ×255 的取整上。
+    private static func clamped(_ value: Float) -> Float {
+        Swift.min(Swift.max(value, 0), 1)
     }
 
     /// 默认抽样步长：把统计代价压到 ~40 万样本以内。预览档 2048（4MP）

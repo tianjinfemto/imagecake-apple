@@ -135,7 +135,7 @@ struct FaceGeometry: Equatable, Sendable {
             var n = 0
             for i in indices.dropFirst() {
                 guard let q = p(i) else { continue }
-                sum += hypot(Double(q.x - center.x), Double(q.y - center.y))
+                sum += hypot(Double(q.x) - Double(center.x), Double(q.y) - Double(center.y))
                 n += 1
             }
             return n > 0 ? sum / Double(n) : 0
@@ -167,7 +167,7 @@ struct FaceGeometry: Equatable, Sendable {
         // 会掉得很低，拿它定中心会把颧骨的阴影当成黑眼圈。
         func underEye(_ iris: CGPoint, ring: [CGPoint]) -> UnderEyeRegion {
             let xs = ring.map { Double($0.x) }
-            let halfWidth = (Swift.max(xs) - Swift.min(xs)) / 2
+            let halfWidth = (xs.max()! - xs.min()!) / 2
             let rX = halfWidth * 1.25
             let rY = halfWidth * 0.75
             return UnderEyeRegion(center: CGPoint(x: Double(iris.x), y: Double(iris.y) + halfWidth * 0.9),
@@ -249,8 +249,8 @@ enum RegionRaster {
         }
         var bytes = [UInt8](repeating: 0, count: size.pixelCount)
         let ys = ring.map { Double($0.y) }
-        let top = Swift.max(0, Int(Swift.min(ys).rounded(.down)))
-        let bottom = Swift.min(size.height - 1, Int(Swift.max(ys).rounded(.up)))
+        let top = Swift.max(0, Int(ys.min()!.rounded(.down)))
+        let bottom = Swift.min(size.height - 1, Int(ys.max()!.rounded(.up)))
         guard top <= bottom else { return MaskBuffer.filled(size, value: 0) }
 
         for y in top ... bottom {

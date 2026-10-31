@@ -94,10 +94,10 @@ enum ShapeWarp {
         var touched = false
 
         for face in faces {
-            touched |= applyFaceEdits(&field, size: size, face: face, beauty: beauty)
+            touched = touched || applyFaceEdits(&field, size: size, face: face, beauty: beauty)
         }
         if let body {
-            touched |= applyBodyEdits(&field, size: size, body: body, beauty: beauty)
+            touched = touched || applyBodyEdits(&field, size: size, body: body, beauty: beauty)
         }
         guard touched else { return nil }
         field.clampMagnitude()
