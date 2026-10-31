@@ -216,7 +216,7 @@ final class StyleWorkflowTests: XCTestCase {
         XCTAssertNotNil(one)
         XCTAssertEqual(one?.pixelSize.width, 295)
         XCTAssertEqual(one?.pixelSize.height, 413)
-        XCTAssertEqual(one?.aspect, 25.0 / 35.0, accuracy: 1e-9)
+        if let one { XCTAssertEqual(one.aspect, 25.0 / 35.0, accuracy: 1e-9) }
     }
 
     func testSuggestedCropKeepsAspectAndHeadRatio() {
@@ -224,7 +224,7 @@ final class StyleWorkflowTests: XCTestCase {
         guard let spec = IDPhoto.spec(id: "one") else { return XCTFail("缺一寸规格") }
         let head = PixelRect(x: 500, y: 200, width: 200, height: 300)
         let rect = IDPhoto.suggestedCrop(canvas: canvas, spec: spec, headBox: head)
-        XCTAssertEqual(rect.width / rect.height, spec.aspect, accuracy: 0.01)
+        XCTAssertEqual(rect.width / rect.height, Double(spec.aspect), accuracy: 0.01)
         XCTAssertGreaterThanOrEqual(rect.minX, 0)
         XCTAssertLessThanOrEqual(rect.maxX, 1)
         XCTAssertGreaterThanOrEqual(rect.minY, 0)
@@ -253,7 +253,8 @@ final class StyleWorkflowTests: XCTestCase {
         XCTAssertEqual(sheet.canvas, paper.pixelSize)
         for slot in sheet.slots {
             XCTAssertEqual(slot.size, spec.pixelSize, "每个槽位都是冲印尺寸")
-            XCTAssertTrue(slot.maxX <= sheet.canvas.width, slot.maxY <= sheet.canvas.height)
+            XCTAssertTrue(slot.maxX <= sheet.canvas.width && slot.maxY <= sheet.canvas.height,
+                          "槽位越界会把照片切到画布外")
         }
         for (i, a) in sheet.slots.enumerated() {
             for b in sheet.slots.dropFirst(i + 1) {
@@ -275,8 +276,9 @@ final class StyleWorkflowTests: XCTestCase {
         XCTAssertNotNil(result)
         guard let result else { return }
         XCTAssertEqual(result.size, sheet.canvas)
-        let inside = Int((slot.y + slot.height / 2) * CGFloat(sheet.canvas.width)
-                         + (slot.x + slot.width / 2))
+        let centerY = slot.y + slot.height / 2
+        let centerX = slot.x + slot.width / 2
+        let inside = centerY * sheet.canvas.width + centerX
         XCTAssertEqual(result.data[inside * 4], 200, "槽位中心是照片")
         XCTAssertEqual(result.data[0], 255, "页边距是白底")
     }
