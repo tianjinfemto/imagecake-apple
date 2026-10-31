@@ -14,8 +14,8 @@
 | 四条曲线（RGB/红/绿/蓝） | ✅ | 单调三次 Hermite（Fritsch–Carlson），屏幕弧线与像素映射同一段插值 |
 | 降噪 / 锐化 | ✅ | 双边滤波（保边平滑）+ unsharp mask，作用在调色之后、**液化/图章**与补丁之前（`SpatialFilters`）；4MP 预览约 0.3–0.8 秒，32MP 导出 3–8 秒 |
 | 补光 / 高光柔化 | ✅ | 按亮度三区权重抬暗部 / 压高光（`ToneEngine`，在曲线之前）；只动亮度不染色，形式是 `v+k·(1−v)` 与 `v−k·v`，两端自然饱和不会死白/涂灰 |
-| 本地调节（椭圆/笔迹） | ✅ | `LocalAdjustmentEngine`：选区掩码复用笔迹底座（`BrushStroke`），选区内叠一层调色参数（曝光/对比/饱和/色温/色调/锐化），按羽化掩码混合；`LocalAdjustmentPanel` 提供入口 |
-| 旋转 / 裁剪 / 翻转 | ✅ | `GeometryEngine`：90° 倍数走整像素搬运（不插值），任意角度走双线性反向采样；裁剪复用各容器 `cropped(to:)`；`GeometryPanel` 提供左转/右转/水平翻转/垂直翻转/裁剪入口 |
+| 本地调节（椭圆/笔迹） | ✅ | `LocalAdjustmentEngine`：选区支持**三形状**（`LocalMask`：画笔笔迹 / 径向渐变 / 线性渐变），选区内叠一层调色参数（曝光/对比/饱和/色温/色调/锐化），按羽化掩码混合；入口在「风格」面板（径向/线性用画布框选定位，画笔走新增的「选区」工具） |
+| 旋转 / 裁剪 / 翻转 | ✅ | `GeometryEngine`：90° 倍数走整像素搬运（不插值），任意角度走双线性反向采样；裁剪复用各容器 `cropped(to:)`。**本轮修掉一个真缺陷**：`geometry` 之前从未被 `ImageDocument.render()` 消费（面板只显示值），现在在渲染链最前作用到线性图上；几何不重映射已有笔迹/AI 资产坐标，所以“先定构图再落笔”写在文档注释里 |
 | 透视 / 自动水平 | ⛔ | 透视需额外的消失点检测；自动水平依赖 EXIF 方向（ImageLoader 已处理）+ 地平线检测 |
 | 智能构图（auto crop） | ✅ | `SmartCropEngine`：基于人脸关键点（478 点）或人像 α 外接框，按三分法留 margin 建议裁剪框；`GeometryPanel` 一键应用 |
 
@@ -24,6 +24,10 @@
 | imagecake 模块 | 本仓状态 | 差异说明 |
 |---|---|---|
 | 人像分割（MODNet 连续 α） | ✅ | 预处理/后处理口径照实测（sRGB 码、symmetric、长边 512 取 32 倍数、截断取整）；**新增 Vision 兜底** |
+| 皮肤掩码（色域 + 约束） | ✅ | `SkinMask`：YCbCr 肤色椭圆 + HSV 双门限，再与人像 α 相与、按人脸框分脸/身。零权重、可断言；已知边界（暖色背景会被误判）写在注释里，没有 α 也没有关键点时点名 `[no_constraint]` |
+| 中性灰磨皮 / 局部瑕疵 / 肤色统一 / 油光 / 美白 | ✅ | `BeautyEngine`：磨皮是频率分离（只平滑低频，高频纹理按力度保留）且分平整/立体两模式；局部瑕疵用与邻域低频之差定阈值；后四项在「亮度 + 红绿 + 蓝黄」对立色空间里只做色度收敛，**亮度守恒由构造保证**（有断言）。全部只在皮肤掩码内生效，掩码外逐比特不变 |
+| 亮眼 / 牙齿美白 / 唇色 / 腮红 | ✅ | `FaceGeometry`（478 点 → 语义锚点；数量凑不齐直接返回 nil，不拿错索引去推脸）+ `RegionEnhance`（多边形/椭圆栅格 + 对立色修改）；瞳孔不抬、高饱和唇线不当牙齿。**逐张脸都做**（`faceGeometries` 数组，合影里不会只动最大那张） |
+| 祛黑眼圈 / 祛法令纹 | ✅ | 同层的两个专项目：`FaceGeometry` 派生下睑椭圆与"鼻翼→嘴角"旋转椭圆带（`RegionRaster.disk(angle:)`），前者只抬亮不压暗、极暗像素不动；后者只填"比低频邻域暗得多的细线"，低频阴影逐比特不变。全部离线可断言（数值由 Python 镜像核对） |
 | 换底色 / 去色边 | ✅ | 连续 α 合成；defringe 用邻域实心色替换边缘脏色（`EdgeDefringe`，合成前跑，α 不变）；无实心邻居时保守保留 |
 | 背景虚化 | ✅ | 三次盒式模糊近似高斯；半径随长边缩放 |
 | 智能消除（LaMa） | ✅ | 以选区为中心取 512 正方形窗口；大选区自动多窗 tiling（`TileGrid.interiors` 分块，每块各开窗口跑 LaMa，返回多个 `InpaintPatch`） |
@@ -31,8 +35,8 @@
 | 仿制图章 / 液化 / 保护笔刷 | ✅ | 三个工具从算子到渲染到**画布手势**全链路接通：`BrushState` 存笔迹 → `ImageDocument.render()` 重放 → `CanvasView` 单指拖落笔 → `BrushPanel` 工具选择/参数/取样/清除 |
 | 面部重绘（GFPGAN） | ✅ | 512 定宽、1/255、输出自夹取、椭圆羽化、闭眼不改只点名 |
 | AI 超清（ESRGAN x4v3） | ✅ | 互不重叠内部块 + 每块加一圈上下文；2x 由 4x 降采样 |
-| 面部关键点 478 / 五官形变 | ✅ | `FaceLandmarksTask`：Vision 检测人脸框 → 478 点网络推理 → 归一化坐标输出；`AIPanel` 一键检测，结果存 `EditorModel2.faceLandmarksResult` 供五官形变液化消费 |
-| 美体（RTMPose 17 点） | ✅ | `BodyPoseTask`：需先抠图获取人像 α → 外接框内跑 RTMPose-m → 17 关节点（COCO 格式）；`AIPanel` 一键检测 |
+| 面部关键点 478 / 五官形变 | ✅ | `FaceLandmarksTask` 出点 → `FaceGeometry` 派生语义量（虹膜圆心与半径、唇内外环、下颌轮廓、颊部、**下睑椭圆、法令纹带**）→ `ShapeWarp` 驱动位移场（瘦脸/大眼/缩鼻翼/收下颌/微笑唇/下巴）+ `RegionEnhance` 驱动区域美化；结果存 `ImageDocument.faceGeometries`（归一化、**每张脸一项**），预览与导出共用 |
+| 美体（RTMPose 17 点） | ✅ | `BodyPoseTask` 出关节点 → `BodyAnchors`（肩/髋/膝/踝 + 躯干轴 + 腰线）→ `ShapeWarp`：细腰/瘦腿/增高/天鹅颈/直角肩。增高用分段纵向拉伸，**锚线以上逐比特不动**（断言钉住） |
 | 人脸年龄/性别分组 | ✅ | `FaceAttrTask`：两颗独立网络（FairFace age/gender），每张脸裁切喂入 → argmax → 区间标签；`AIPanel` 一键识别，结果按脸显示 |
 | 老照片褪色/划痕 | ✅ | `OldPhotoEngine`：褪色恢复（灰世界白平衡反推偏色）+ 划痕去除（形态学开运算检测细线 + 邻域填充）；零权重、确定性，在调色之前执行；`LinearImage(display:)` 直接 Float 转线性，保留 16bit 精度；`AIPanel` 一键开关 |
 | 衣物/证件照换装 | ⛔ | 需服装分割模型（不在 `models.json` 清单里）；模板合成与服装分割都不在 v1 |
@@ -42,14 +46,19 @@
 | imagecake 模块 | 本仓状态 | 差异说明 |
 |---|---|---|
 | 预设（JSON，v37） | ✅ | 键名逐字对齐；缺键落出厂；未知键点名；比本程序新拒收；外部资产依赖只登记不加载 |
+| 滤镜 / 风格（LUT） | ✅ | `LUTParser` + `CubeLUT`：.cube 读写（**红最快的枚举顺序**、三线性插值、1D 表逐通道）、DOMAIN 不是 0…1 就拒收并点名 `[bad_lut:domain]`；`FilterEngine` 8 个内置确定性风格（采样成 17³ 表）；强度=原像素与查表结果线性混合，0 时逐比特恒等；导入的 .cube 落在 `Documents/ImageCake/LUTs`，找不到时 `[no_lut:名字]` 并跳过该阶段 |
+| 镜头校正 / 颗粒 | ✅ | `LensEngine`：畸变（径向映射 `radiusMap`）、色差（逐通道等量反向，三通道乘子之和恒为 3）、暗角（权重 1→1−k）、颗粒（splitmix 风格整数哈希，同坐标同值 → 两次导出可逐比特比对）。位置层在笔刷之前，输出层在最后 |
 | 撤销 / 重做 | ✅ | 50 步，一格是 `EditSnapshot`（参数 + 笔迹），`ParameterHistory` 已改为泛型；滑杆拖动 600ms 防抖合并成一步，一笔笔刷立即算一步；!换图清空；amendPresent 只改写栈顶 |
 | PNG-8 / JPEG / HEIF | ✅ | ImageIO |
 | PNG-16 / TIFF-16 | ✅ | 两个自家容器写入器：PNG-16 用 zlib stored 块；TIFF-16 用 baseline 6.0。都用 ImageIO 读回验证 |
 | 色彩空间（ICC / lcms2） | ✅ | `ICCProfile`：输出时嵌 sRGB ICC profile（`CGColorSpace(name: .sRGB)` → `iccData`）；输入 ICC 由 Core Graphics 在解码时转 sRGB |
 | 水印 / 边框 / 文字贴纸 | ✅ | `OverlayEngine`：三种元素（水印图/纯色边框/文字），在导出最后一步合成（AI 之后、编码之前）；`OverlayPanel` 提供添加/删除/清除入口 |
-| 拼图排版 | ✅ | `CollageEngine`：4 种模板（1×2/2×1/2×2/1×3），按槽位归一化矩形排版，背景色可配 |
+| 证件照 | ✅ | `IDPhoto`：8 个规格（mm → 300dpi 像素）、按头部占比与头顶留白建议构图（无头部框时居中并点名 `[no_face_box]`）、5/6 寸与 A4 相纸排版（槽位不重叠、越界槽位丢弃）；排版在导出最后一步生效并写 `[id_photo] N 张` |
+| 拼图排版 | ✅ | `CollageEngine`：4 种模板（1×2/2×1/2×2/1×3）+ **三种适配**（等比裁切填满 / 等比留白 / 拉伸），默认填满（把竖图拉成横格比留白更不可接受）。**本轮接上入口**：「工具」面板的拼图卡片 + 导出链把其余图源逐张全分辨率重渲染（不跑重绘/超清）；图不够时不拿主图默默填坑，写 `[collage_short]` / `[collage_failed]` / `[collage_no_template]` 并保留未排版输出 |
+| 素材库 / 修图状态 | ✅ | `ImageLibrary` + `ProjectStore`：选目录扫素材（只扫一层、非图跳过、重名图点名 `[sidecar_conflict]`）、按未修/已修/已出片筛选、状态**从文档派生**而不是手点；参数逐张存在图旁边的 `<名字>.imagecake.json` sidecar，打开时自动接回；比本程序新的预设拒收 |
+| 直方图 / 溢出诊断 | ✅ | `Histogram`：R/G/B + 亮度四组，**分箱与 `rgba8(dither:false)` 逐比特同口径**（否则"屏幕上没溢出、文件里死了"）；越界像素计入 `outOfRangeCount`，不静默夹走；`ClippingOverlay` 标红/蓝溢出，与预览同次渲染算出；入口在「调色」首栏与画布叠层 |
 | 命名模板 / 尺寸档 | ✅ | 尺寸档（长边上限）+ 文件名模板 `{stem}/{date}/{time}/{index}/{ext}`（`ExportNaming`）；非法字符在生成阶段就清掉 |
-| 批量队列 | ✅ | `BatchQueue`：串行处理多张图（同一组参数/预设），每张完成后报告进度，失败不中断队列 |
+| 批量队列 | ✅ | `BatchQueue`：串行处理多张图，每张完成后报告进度，失败不中断队列。**本轮接上入口**：「批量」面板 + `SyncGroups`/`ParamSync` 六组同步（调色/美肤/美型/风格/背景/交付端）——像素蛋糕式“一张调好→其余同步”，而手动液化与修复补丁不在 `EditParameters` 里，所以类型上就拿不走 |
 | CLI | ⛔ | iPadOS 无 CLI 等价路径；macOS 可通过 `xcodebuild` 跑测试但无独立 CLI |
 | 联机拍摄 | ⛔ | iPadOS 无 WIA/USB PTP 的等价路径；相机厂商 SDK 不在范围 |
 | XMP 导入 | ✅ | `XMPImporter`：正则抽 crs: 属性，约 40 键映射到 `EditParameters`（曝光/色温/色调/对比/饱和/HSL/色轮等），未知键跳过并报告 |
@@ -59,8 +68,8 @@
 
 | imagecake | 本仓 |
 |---|---|
-| 1000+ C++ 断言（Catch2 风格自研） | 148 格 XCTest（几何/色彩/色轮与 HSL/色轮坐标/画布视口/空间滤波/补光与高光/文件名模板/去色边/撤销栈与笔迹入栈/笔迹栅格化/液化/仿制图章/保护笔刷/文档级渲染管线与跨分辨率重放/笔刷手势采样/**几何变换/老照片修复/修补工具/智能构图/XMP 导入/拼图/ICC/装饰叠加/本地调节**/容器/预设契约） |
+| 1000+ C++ 断言（Catch2 风格自研） | 244 格 XCTest（几何/色彩/色轮与 HSL/色轮坐标/画布视口/空间滤波/补光与高光/文件名模板/去色边/撤销栈与笔迹入栈/笔迹栅格化/液化/仿制图章/保护笔刷/文档级渲染管线与跨分辨率重放/笔刷手势采样/几何变换/老照片修复/修补工具/智能构图/XMP 导入/拼图/ICC/装饰叠加/本地调节与三形状蒙版/容器/预设契约/**皮肤掩码与六个美肤算子**/**关键点派生几何与区域美化**/**位移场与脸型美体预设**/**.cube 全链路 + 内置风格**/**镜头与颗粒确定性**/**证件照规格与排版**/**ParamSync 同步组**/**文档级几何生效与缺件点名**/**逐脸美化与两个专项目**/**直方图与溢出叠层**/**拼图适配与导出接线**/**素材库与 sidecar**） |
 | 无头 CLI 回归 | 无（iPadOS 无 CLI） |
 | 权重清单 + 双校验 | ✅ 同一份 `models.json`，脚本与 App 共用 |
-| 缺件点名令牌 | ✅ `[no_model:file]` / `[fallback:vision]` / `[closed_eyes]` / `[too_large]` / `[patch_scaled]` / `[no_mask]` / `[no_face]` / `[no_person]` |
+| 缺件点名令牌 | ✅ `[no_model:file]` / `[fallback:vision]` / `[closed_eyes]` / `[too_large]` / `[patch_scaled]` / `[no_mask]` / `[no_face]` / `[no_person]` / `[no_landmarks]` / `[no_pose]` / `[no_constraint]` / `[no_lut:名字]` / `[clipping]` / `[out_of_range]` / `[collage_short]` / `[collage_failed]` / `[collage_no_template]` / `[sidecar_conflict]` / `[no_scope]` |
 | 三端（Win/Linux/macOS） | 双端（macOS/iPadOS），SwiftUI 单代码库 |

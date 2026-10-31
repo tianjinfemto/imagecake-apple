@@ -1,9 +1,13 @@
 import SwiftUI
 
-// 几何面板：旋转 / 翻转 / 裁剪 / 智能构图。
+// 几何面板：旋转 / 翻转 / 裁剪 / 智能构图 / 证件照。
 //
 // 几何变换存 ImageDocument.geometry 而非 EditParameters：
 // 旋转/裁剪改画布尺寸，不是调色参数，不进预设。
+//
+// 几何在渲染链的**最前**，而且不会重映射已有笔迹/AI 资产的坐标，
+// 所以面板上把「先定构图再落笔」写在旋转卡片里：先画完再旋转，
+// 旧笔迹会落在转过之后的不同内容上。
 
 struct GeometryPanel: View {
     @EnvironmentObject private var model: EditorModel
@@ -14,6 +18,7 @@ struct GeometryPanel: View {
             flipSection
             cropSection
             smartCropSection
+            IDPhotoSection().environmentObject(model)
         }
     }
 
@@ -37,6 +42,10 @@ struct GeometryPanel: View {
                     .font(.system(size: 10))
                     .foregroundStyle(Tokens.textSecondary)
             }
+            Text("几何跑在渲染链最前且不会重映射已有笔迹/抠图遮罩：先定构图（旋转/裁剪）再抠图与落笔。")
+                .font(.system(size: 10))
+                .foregroundStyle(Tokens.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -93,6 +102,58 @@ struct GeometryPanel: View {
             Text("检测人脸与主体位置，按三分法留 margin 建议裁剪框。")
                 .font(.system(size: 10))
                 .foregroundStyle(Tokens.textSecondary)
+        }
+    }
+}
+
+// MARK: - 证件照
+
+/// 规格是数据不是滑杆：mm 尺寸与头部占比一旦写错就是「退片」，
+/// 所以规格表集中在 IDPhoto.specs（带断言），面板只负责选型与应用。
+private struct IDPhotoSection: View {
+    @EnvironmentObject private var model: EditorModel
+    @State private var specID = "one"
+    @State private var paperID = "6inch"
+
+    var body: some View {
+        SectionCard(title: "证件照", subtitle: "规格/构图/排版") {
+            Picker("规格", selection: $specID) {
+                ForEach(IDPhoto.specs) { spec in
+                    Text(spec.title).tag(spec.id)
+                }
+            }
+            Button {
+                model.applyIDPhoto(specID: specID)
+            } label: {
+                Label("按规格定构图", systemImage: "person.crop.square")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Tokens.accent)
+            .disabled(!model.hasImage)
+
+            Picker("相纸", selection: $paperID) {
+                ForEach(IDPhoto.papers, id: \.id) { paper in
+                    Text(paper.title).tag(paper.id)
+                }
+            }
+            HStack(spacing: 8) {
+                Button("排版到相纸") { model.composeIDPhotoSheet(specID: specID, paperID: paperID) }
+                    .buttonStyle(.bordered)
+                    .disabled(!model.hasImage)
+                Button("取消排版") { model.clearIDPhotoSheet() }
+                    .buttonStyle(.bordered)
+                    .disabled(model.document?.idPhotoSheet == nil)
+            }
+            if let sheet = model.document?.idPhotoSheet {
+                Text("已排版：\(sheet.paper.title) · \(sheet.count) 张 · \(sheet.canvas.width)×\(sheet.canvas.height)px")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(Tokens.ok)
+            }
+            Text("构图按头部定位（需先检测关键点，没检测就按画面中心并点名 [no_face_box]）；底色只在已抠图时自动切到规格推荐色。排版在导出的最后一步生效，尺寸固定为相纸的 \(IDPhoto.dpi)dpi 像素。")
+                .font(.system(size: 10))
+                .foregroundStyle(Tokens.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

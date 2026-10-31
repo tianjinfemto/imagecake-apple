@@ -29,9 +29,24 @@ iOS 15+ / macOS 14+），权重按需下载、缺件点名。
 | 模型管理 | ✅ | 清单驱动的下载 / 导入 / SHA-256 校验 / 删除 / 释放会话；字节数与哈希直接展示 |
 | 单元测试 | ✅ | 曲线单调性、色彩域、PNG-16 可被 ImageIO 读回、分块覆盖/不重叠、补丁合成、预设契约、**文档级渲染管线（笔刷接线 + 跨分辨率重放）** |
 
-**v1 明确不做**（与 imagecake 的差距，见 [docs/parity.md](docs/parity.md)）：
-美体与五官预设形变、证件照与换装、拼图排版、批量与 CLI、滤镜 `.cube`、
-XMP 导入、水印边框、ICC/lcms2、联机拍摄。
+| 人像精修（皮肤） | ✅ | `SkinMask`（色域 ∧ 人像 α ∧ 人脸框三层约束）+ `BeautyEngine`：**中性灰磨皮（频率分离，平整/立体两模式）**、疤痕类瑕疵清理、肤色统一、红血丝收敛、油光压制、美白；脸/身各独立力度。掩码外逐比特不变 |
+| 五官区域美化 | ✅ | `FaceGeometry`（MediaPipe 478 点 → 语义锚点）+ `RegionEnhance`：亮眼（不抬瞳孔）、牙齿美白（去黄 + 饱和门控）、唇色（唇环）、腮红，**外加两个专项目：祛黑眼圈（只抬不压）、祛法令纹（只填细暗线、不动低频阴影）**。没关键点就整段跳过并点名 `[no_landmarks]` |
+| 逐脸美化（合影） | ✅ | `ImageDocument.faceGeometries` 是**数组**：预设形变逐脸累加进同一张位移场、区域美化逐脸取大合并掩码、皮肤按 N 个脸框分脸/身——不再"一家四口只磨小孩的脸" |
+| 五官/身体预设形变 | ✅ | `WarpField`（与手动液化同一套“先累加场、只重采样一次”底座）+ `ShapeWarp`：瘦脸/大眼/缩鼻翼/收下颌/微笑唇/下巴；细腰/瘦腿/增高（以臀部水平线为锚的分段拉伸）/天鹅颈/直角肩 |
+| 滤镜与风格 | ✅ | `LUTParser`/`CubeLUT`（.cube 读写 + 三线性插值 + 1D 逐通道）+ 8 个内置确定性风格 + 强度混合；`.cube` 导入落在 `Documents/ImageCake/LUTs`，找不到时点名 `[no_lut:名字]` |
+| 镜头与画质层 | ✅ | `LensEngine`：畸变（径向映射）、色差（逐通道等量反向）、暗角、颗粒（同坐标同值的确定性哈希，两次导出可逐比特比对） |
+| 局部蒙版 | ✅ | `LocalMask` 三形状：画笔 / 径向渐变 / 线性渐变（前两个用画布框选定位，画笔走新增的「选区」工具） |
+| 证件照 | ✅ | `IDPhoto`：8 个规格（小一寸→美签）、mm→px、按头部占比建议构图、5/6 寸与 A4 相纸排版（导出最后一步生效） |
+| 拼图排版 | ✅ | `CollageEngine` 接上入口：「工具」面板 4 模板 / 3 底色 / 填满或留白两种适配；导出时其余图源逐张全分辨率重渲染，图不够写 `[collage_short]` 且不默默重复主图 |
+| 素材库（项目视图） | ✅ | 工具栏「图库」：选目录 → 缩略图网格 → 未修/已修/已出片筛选 → 点开即编；参数逐张存在图旁边的 `<名字>.imagecake.json`，下次进来自动接回 |
+| 直方图与溢出警告 | ✅ | `Histogram`（R/G/B + 亮度，分箱与 8bit 编码逐比特同口径）+ 画布溢出高亮叠层（红=高光死/蓝=暗部死）+ 底栏 `[clipping]` 警告 |
+| 批量与参数同步 | ✅ | `SyncGroups` + `ParamSync`（六组：调色/美肤/美型/风格/背景/交付端）+ 「批量」面板接上 `BatchQueue`。手动液化与修复补丁不在参数里，所以**类型上就拿不走** |
+| 几何 | ✅ | 本轮修掉一个真缺陷：`geometry` 之前**从未被 `render()` 消费**（面板只是把值显示出来）。现在旋转/翻转/裁剪在渲染链最前作用到线性图，并有逐比特断言 |
+
+**与商业产品像素蛋糕的完整差距清单**（含已补与仍未补，分成入口/算法/权重/平台四类）：
+[docs/pixcake-parity.md](docs/pixcake-parity.md)。本轮已清零"入口缺口"（哑资产不再）。
+仍未做的主要是：主题妆容模板、换装/衣物祛褶、换天空、AI 打光/慢门、逐脸不同力度、
+联机拍摄、云端协作与在线选片（这三项与"全本地、无服务"的立场冲突，**明确不做**）。
 
 ---
 
@@ -108,14 +123,28 @@ AI 任务与权重的关系：
 ImageCake/
 ├─ App/            ImageCakeApp.swift          双端入口（WindowGroup + 平台工具栏）
 ├─ Domain/         EditParameters.swift        参数/预设模型（键名对齐 imagecake）
-│                  ImageDocument.swift         会话状态 + 渲染序（含换底色）
+│                  BeautyParameters.swift      人像/滤镜/镜头三组参数（本仓扩展键）
+│                  ImageDocument.swift         会话状态 + 渲染序（含皮肤、美型、证件照）
 │                  PresetStore.swift           预设读写/版本闸门/未知键报告
+│                  ParamSync.swift             批量同步的六个参数组（哪些能同步）
+│                  BatchQueue.swift            串行批量队列（已接「批量」面板）
+│                  IDPhoto.swift               证件照规格/构图/相纸排版
 │                  ExportPipeline.swift         全分辨率导出链
 │                  ModelCatalog.swift           权重清单解码与 IO 规格
 ├─ Imaging/        ColorMath / CurveMath        sRGB、HSV、色轮、单调曲线
 │                  Images.swift                 三层容器（线性/显示/8bit）+ 重采样
 │                  ImageLoader.swift            ImageIO + RAW + 写盘
 │                  ToneEngine.swift             调色链（线性 → 显示）
+│                  SkinMask.swift               皮肤三层掩码（色域 ∧ α ∧ 人脸框）
+│                  BeautyEngine.swift           磨皮/瑕疵清理/匀肤色/油光/美白（频率分离 + 对立色）
+│                  FaceGeometry.swift           478 点 → 语义锚点 + 多边形/椭圆栅格
+│                  RegionEnhance.swift          亮眼/牙齿/唇色/腮红 + 祛黑眼圈/祛法令纹（逐脸）
+│                  Histogram.swift              直方图与溢出叠层（分箱=8bit 编码口径）
+│                  WarpField.swift              位移场底座（液化与预设形变共用）
+│                  ShapeWarp.swift              脸型/身体预设形变 + BodyAnchors
+│                  CubeLUT.swift                .cube 解析/三线性/内置风格/LUT 目录
+│                  CollageEngine.swift          拼图模板/三种适配/多图源排版
+│                  LensEngine.swift             畸变/色差/暗角/颗粒
 │                  StrokeRasterizer.swift       笔迹栅格化（液化/图章/保护笔刷共同底座）
 │                  ImageSampling.swift          双线性采样（液化与图章共用）
 │                  LiquifyEngine / CloneStampEngine  笔刷算子，都接受 protection 掩码
@@ -125,21 +154,30 @@ ImageCake/
 │                  TensorIO.swift               图像 ↔ NCHW/NHWC 张量
 │                  ImageOps.swift               遮罩外接框/膨胀/羽化、分块几何
 │                  MattingTask / InpaintTask / SuperResTask / FaceRestoreTask
-│                  VisionSupport.swift          Vision 人像分割兜底 + 人脸
+│                  FaceLandmarksTask / BodyPoseTask / FaceAttrTask  关键点与属性（驱动美型）
+│                  VisionSupport.swift          Vision 人像分割回退 + 人脸
 ├─ UI/             EditorModel.swift            状态机（所有重计算离开主线程）
-│                  CanvasView / CurveEditor     画布框选、曲线编辑
-│                  TonePanel / AIPanel / ModelsPanel / ExportSheet
+│                  CanvasView / CurveEditor     画布框选、曲线编辑、溢出高亮叠层
+│                  TonePanel（含 HistogramView）/ BeautyPanel / AIPanel / StylePanel
+│                  ToolsPanel（笔刷+几何+装饰+拼图）/ BatchPanel / LibraryPanel
+│                  ModelsPanel / ExportSheet
 └─ Resources/      Models/models.json           权重清单（唯一真相，脚本共用）
 ```
 
 ### 管线顺序（写在一处，别处不许重排）
 
 ```
-线性域：曝光 → 色温/色调
-显示域：对比 → 四条曲线（RGB 复合在前）→ 三区色轮 → 8 分区 HSL + 色相 + 饱和度
-AI 资产：人像 α → 换底色/背景虚化；修复补丁（相对量）贴在显示域
-导出：全分辨率重载 → 调色 → 补丁 → 换底色 → 面部重绘 → AI 超清(最后) → 尺寸档 → 编码
+几何（旋转/翻转/裁剪，最先：它改画布）→ [老照片] → 线性域：曝光 → 色温/色调
+显示域：对比 → 补光/高光柔化 → 四条曲线（RGB 复合在前）→ 三区色轮 → 8 分区 HSL + 色相 + 饱和度
+人像：皮肤掩码（在滤镜之前判色）→ 滤镜/LUT → 镜头畸变与色差 → 降噪 → 锐化
+　　　→ 美肤（磨皮/瑕疵/匀肤色/红血丝/油光/美白）→ 区域美化（眼/牙/唇/腮 + 黑眼圈/法令纹，逐脸）
+　　　→ 美型预设形变 → 手动液化 → 仿制图章 → 修补 → 修复补丁 → 换底色 → 暗角与颗粒
+导出：全分辨率重载 → 同上整条链 → 面部重绘 → AI 超清 → 证件照排版 → 拼图排版 → 装饰叠加 → 尺寸档 → 编码
 ```
+
+新增项的位置不是随手插的，每条都有理由（写在 `ImageDocument.render` 的注释里）：
+皮肤掩码在滤镜**之前**判，因为风格会把整个色相分布推走；畸变/色差在笔刷**之前**，
+因为它们也改像素位置；暗角与颗粒在**最后**，因为超清与重绘会把颗粒当细节放大。
 
 - **AI 预处理吃 sRGB 显示码**，不是线性浮点（模型在 sRGB 码上训练，喂线性等于换分布）。
 - **16bit 交付件**不走 ImageIO：`PNG16Writer` 自己写 IHDR/IDAT/IEND，端序与 filter 可读。
@@ -151,8 +189,9 @@ AI 资产：人像 α → 换底色/背景虚化；修复补丁（相对量）�
 
 | 手段 | 覆盖 |
 |---|---|
-| 单元测试（121 格） | 曲线单调/恒等/坏输入回退；中性调色只做 sRGB 编码；+1EV 线性翻倍；色相旋转；**三区色轮只碰自己的亮度区、八分区 HSL 的相邻带权重分摊**；**色轮坐标几何（方向/力度/死区/往返）**；**画布视口几何（缩放锚点/平移夹紧/归一化往返）**；**降噪降方差且保边、锐化产生 overshoot 且不越界**；**补光只抬暗部、高光柔化只压高光且不染灰色**；**文件名模板的占位符/非法字符/空模板兜底**；**去色边只改边缘色、实心不动、无实心邻居时保守**；**撤销栈的空历史/重做失效/超限丢最旧/只改笔刷也入栈/改写栈顶不新增格**；**笔迹栅格化的连通/软硬边/半径归一化/重叠不叠加**；**液化四个方向与零位移恒等**；**文档级渲染：空笔刷逐比特不变、笔刷真的进了 render()、保护笔迹能挡住液化、渲染不消耗笔迹、同一条笔迹在 32/128 两种分辨率上落在同一相对位置**；RGBA8 往返；**PNG-16 与 TIFF-16 经 ImageIO 读回**；分块覆盖恰好一次、加边不越界；外接框/膨胀/羽化；补丁合成只动遮罩内；补丁随画布缩放；预设往返/未知键/太新拒收/缺键落出厂；清单解码与下载 URL；MODNet 输入尺寸；GFPGAN 方框几何 |
+| 单元测试（244 格） | 曲线单调/恒等/坏输入回退；中性调色只做 sRGB 编码；+1EV 线性翻倍；色相旋转；**三区色轮只碰自己的亮度区、八分区 HSL 的相邻带权重分摊**；**色轮坐标几何**；**画布视口几何**；**降噪降方差且保边、锐化产生 overshoot 且不越界**；**补光只抬暗部、高光柔化只压高光**；**文件名模板**；**去色边**；**撤销栈**；**笔迹栅格化/液化/图章/保护笔刷**；**文档级渲染（笔刷接线 + 跳分辨率重放）**；RGBA8 往返；**PNG-16 与 TIFF-16 经 ImageIO 读回**；分块/外接框/羽化/补丁合成；预设往返/未知键/太新拒收/缺键落出厂；**皮肤色域与三层约束**；**磨皮降噪声方差但保纹理、掩码外逐比特不变**；**对立色往返恒等、匀肤色不改亮度、油光只压亮斑**；**478 点派生语义量**；**多边形/椭圆栅格**；**位移场单位换算与锚线守恒**；**增高时头与躯干逐比特不动**；**.cube 枚举顺序/三线性/1D 逐通道/坏表点名/序列化往返**；**内置风格确定性与抬黑**；**径向映射单调、颗粒可重复**；**证件照 mm→px/槽位不重叠/排版落点**；**ParamSync 只搬所选组**；**局部蒙版三形状**；**文档级：几何真生效、缺资产整段跳过并点名**；**逐脸美化：第二张脸真的动、只给一张脸时另一张逐比特不变**；**两个专项目：黑眼圈只抬不压、法令纹只填细暗线不碰低频阴影**；**直方图分箱与 8bit 编码同口径（含越界值）**；**旋转椭圆栅格逐字数值**；**拼图三种适配与满铺不露底色**；**sidecar 命名/重名冲突/坏文件与未来版本拒收**；**素材库状态派生与筛选** |
 | **真实编译**（2026-10-30） | GitHub Actions macOS runner：`xcodebuild test` 在 macOS 上跑完 **113 格全绿**；同一批断言在 **iPhone 16 Pro 模拟器**上也跑完 **113 格 / 0 failed / 0 skipped**（宿主 App 被真实拉起），Xcode 16.4 + XcodeGen |
+| **这两轮（人像/滤镜/镜头/证件照/批量 + 逐脸/专项/直方图/拼图/素材库）尚未编译** | 开发机是 Windows，没有 Swift 工具链：两轮累计 96 格新断言与 25 个新文件只经过人工逐文件复查 + Python 镜像核对，**没跑过编译器**。本轮已把"下睑/法令纹派生、黑眼圈亮度场、法令纹频率门限、旋转椭圆盘"逐行镜像跑出实际数值，断言阈值按结果回填。下一步必须先在 CI 上跑一轮（`macos-test` + `ios-build`），症状预期：类型推断/重载与可选绑定问题，不会是算法问题 |
 | 尚未做 | **未在真机上跑过**（模拟器不是 iPad：触摸压感、Apple Pencil、真 GPU 路径、系统权限弹窗都模拟不了）。ORT 权重也没有在真机上跑过推导——CI 不下载 660MB 权重 |
 
 > 真实编译累计暴露并修掉了 5 个问题，全是“没编译过就发现不了”的类型：
@@ -169,8 +208,8 @@ AI 资产：人像 α → 换底色/背景虚化；修复补丁（相对量）�
 
 | job | 做什么 | 能抓到什么 |
 |---|---|---|
-| `macos-test` | 选 Xcode 16 → 装 XcodeGen → 校验模型清单 → 生成工程 → `xcodebuild test` | 全部 121 格断言；App 宿主测试的签名/`TEST_HOST` 问题 |
-| `ios-build` | 同一套生成流程 → 构建 iOS Simulator → 再把 121 格在模拟器上跑一遍 | UIKit/AppKit 分支、iOS-only SwiftUI API、Info.plist 键，以及 **`#if os(iOS)` 里那些 macOS 一行都执行不到的代码**（`PhotoLibraryWriter` / 相册写回）和 App 在 iOS 运行时上能否被拉起 |
+| `macos-test` | 选 Xcode 16 → 装 XcodeGen → 校验模型清单 → 生成工程 → `xcodebuild test` | 全部 244 格断言；App 宿主测试的签名/`TEST_HOST` 问题 |
+| `ios-build` | 同一套生成流程 → 构建 iOS Simulator → 再把 244 格在模拟器上跑一遍 | UIKit/AppKit 分支、iOS-only SwiftUI API、Info.plist 键，以及 **`#if os(iOS)` 里那些 macOS 一行都执行不到的代码**（`PhotoLibraryWriter` / 相册写回）和 App 在 iOS 运行时上能否被拉起 |
 | `ios-unsigned-ipa` | Release 构建设备真机包 → 打成未签名 ipa | 只在推 main 或手动触发时跑；侧载人群用（见 [docs/device-check.md](docs/device-check.md) §1.5） |
 
 > 设备名不写死：runner 镜像里的模拟器随 Xcode 版本变，写死 `iPhone 15` 这种名字
@@ -194,9 +233,12 @@ CI 已跑通（首次全绿：run [40809005087](https://github.com/tianjinfemto/
 
 - **理念继承**：单一真相（预设键名、模型清单、管线顺序）、缺件点名、不静默降级、几何与网络分离以便无权重断言。
 - **技术不同**：imagecake 是 Qt Widgets + OpenCV + LibRaw；这里是 SwiftUI + Accelerate/手写算子 + Core Image（RAW）+ ORT。
-- **未移植的对象模型**：笔迹（液化/保护/图章）、批量队列、导出模板、批量分组、联机拍摄、CLI。
+- **未移植的对象模型**：工程文件（持久化整组片子与逐张状态）、CLI、联机拍摄。
+  笔迹与批量队列已经接通（笔迹到画布手势，批量到「批量」面板）；
+  `CollageEngine`（拼图）仍只有算子没有入口，列在 [docs/pixcake-parity.md](docs/pixcake-parity.md)。
 
-完整的模块级对照见 [docs/parity.md](docs/parity.md)。
+完整的模块级对照见 [docs/parity.md](docs/parity.md)；与商业产品像素蛋糕的差距见
+[docs/pixcake-parity.md](docs/pixcake-parity.md)。
 
 ---
 

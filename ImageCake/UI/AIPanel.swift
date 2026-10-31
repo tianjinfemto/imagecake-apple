@@ -201,6 +201,10 @@ struct AIPanel: View {
             }
             .buttonStyle(.bordered)
             .disabled(model.document == nil)
+            Text("已派生语义量：\(model.document?.faceGeometries.count ?? 0) 张脸（按面积从大到小）。区域美化与预设形变逐张都跑，合影里不会只动最大那张；凑不齐 478 点的那张直接丢弃，不拿错的索引去推脸。")
+                .font(.system(size: 10))
+                .foregroundStyle(Tokens.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
             if let result = model.faceLandmarksResult, !result.report.note.isEmpty {
                 Text(result.report.note)
                     .font(.system(size: 10))

@@ -13,6 +13,7 @@ struct EditorView: View {
     @State private var showOpen = false
     @State private var showModels = false
     @State private var showExport = false
+    @State private var showLibrary = false
     @State private var showPresetImport = false
     @State private var showPresetExport = false
     @State private var presetPayload: ExportFile?
@@ -72,6 +73,10 @@ struct EditorView: View {
         .sheet(isPresented: $showExport) {
             ExportSheet().environmentObject(model)
         }
+        .sheet(isPresented: $showLibrary) {
+            // 素材库要宽度，所以是 sheet 而不是检查器里的第七个标签页。
+            LibraryPanel { showLibrary = false }.environmentObject(model)
+        }
         .overlay {
             if let busy = model.busy {
                 BusyOverlay(title: busy.title, detail: busy.detail)
@@ -109,23 +114,25 @@ struct EditorView: View {
         VStack(spacing: 0) {
             Picker("面板", selection: $tab) {
                 Text("调色").tag(0)
-                Text("AI").tag(1)
-                Text("笔刷").tag(2)
-                Text("几何").tag(3)
-                Text("装饰").tag(4)
+                Text("人像").tag(1)
+                Text("AI").tag(2)
+                Text("风格").tag(3)
+                Text("工具").tag(4)
+                Text("批量").tag(5)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .padding(12)
+            .padding(10)
 
             ScrollView {
                 VStack(spacing: 12) {
                     switch tab {
                     case 0: TonePanel().environmentObject(model)
-                    case 1: AIPanel().environmentObject(model)
-                    case 2: BrushPanel().environmentObject(model)
-                    case 3: GeometryPanel().environmentObject(model)
-                    default: OverlayPanel().environmentObject(model)
+                    case 1: BeautyPanel().environmentObject(model)
+                    case 2: AIPanel().environmentObject(model)
+                    case 3: StylePanel().environmentObject(model)
+                    case 4: ToolsPanel().environmentObject(model)
+                    default: BatchPanel().environmentObject(model)
                     }
                 }
                 .padding(.horizontal, 12)
@@ -147,7 +154,16 @@ struct EditorView: View {
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(Tokens.textSecondary)
                 .lineLimit(1)
-            if !model.lastAINote.isEmpty {
+            // 缺件点名排在“上一次 AI 结果”之前：滑杆推了却没反应时，
+            // 用户需要先看到“因为缺关键点”，而不是一个旧的耗时数字。
+            if !model.pipelineNotes.isEmpty {
+                Text(model.pipelineNotes[0])
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(Tokens.danger)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .macHelp(model.pipelineNotes.joined(separator: "\n"))
+            } else if !model.lastAINote.isEmpty {
                 Text(model.lastAINote)
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(Tokens.textSecondary)
@@ -158,8 +174,19 @@ struct EditorView: View {
             if model.hasImage {
                 TokenBadge(text: "\(model.canvasSize.width)×\(model.canvasSize.height)")
             }
+            // 溢出警告排在缺件徽章之前："高光死了"是本次修图的结果问题，
+            // 而"缺权重"是环境事实，前者对当下这张图更紧要。
+            if let warning = model.clippingWarning {
+                Text(warning)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(Tokens.danger)
+                    .lineLimit(1)
+            }
             if model.document?.isRAW == true {
                 TokenBadge(text: "RAW")
+            }
+            if !model.pipelineNotes.isEmpty {
+                TokenBadge(text: "缺件 \(model.pipelineNotes.count)", tone: .bad)
             }
             TokenBadge(text: ORTEngine.isSupported ? "ORT" : "ORT 缺失",
                        tone: ORTEngine.isSupported ? .good : .bad)
@@ -225,6 +252,12 @@ struct EditorView: View {
                 Label("预设", systemImage: "slider.horizontal.3")
             }
             .disabled(!model.hasImage)
+
+            Button {
+                showLibrary = true
+            } label: {
+                Label("图库", systemImage: "square.grid.2x2")
+            }
 
             Button {
                 showModels = true

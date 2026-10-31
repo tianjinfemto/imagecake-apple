@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 // 一张图在会话里的全部状态。
@@ -9,8 +10,17 @@ import Foundation
 //   · 抠图/修复都存"参考尺寸"：预览是降采样的，导出是全分辨率的，
 //     没有参考尺寸就只能靠当前画布猜，而猜错的表现是"遮罩整体错位"。
 //
-// 渲染顺序（与 imagecake 的链同序，只保留 v1 范围内可验证的阶段）：
-//   线性调色 → 显示域调色 → 空间滤波 → 液化 → 仿制图章 → 修复补丁 → 换底色/背景虚化
+// 渲染顺序（与 imagecake 的链同序，只保留可验证的阶段）：
+//   几何转正 → [老照片] → 线性调色 → 显示域调色 → [本地调节] → [皮肤掩码]
+//   → [滤镜/LUT] → [镜头畸变、色差] → 降噪 → 锐化 → [美肤] → [五官区域美化]
+//   → [美型预设形变] → 手动液化 → 仿制图章 → 修补 → 修复补丁 → 换底色 → [暗角、颗粒]
+//
+// 几个位置的硬理由：
+//   · 几何最先：它改画布尺寸，之后的归一化坐标（笔迹/遮罩/关键点）才都是
+//     “用户当前看到的画面”上的坐标；
+//   · 皮肤掩码在滤镜之前：风格会把色相整体推走，在推之前的色调上判肤色更稳；
+//   · 畸变/色差在笔刷之前：它们也改像素位置，排在笔刷后面会把已落好的笔迹抬位；
+//   · 暗角与颗粒最后：超清/重绘会拿粒度当细节放大，必须等一切像素级处理完了再加。
 //
 // 笔刷为什么夹在空间滤波之后、补丁之前：一条硬规则——**每个笔刷看到的
 // 画面，必须就是用户落笔那一刻在画面上看到的画面**。预览与导出都按同一
@@ -18,6 +28,10 @@ import Foundation
 // 顺序：先框选再液化，补丁会落在液化后的位置上——因为用户确实是对着
 // 液化后的画面画的框。反过来（笔刷在调色之前）则不成立：调色后的像素
 // 已经变了，图章从「看不到的颜色」取样。
+//
+// 已知代价（不是 bug）：几何变换不会重映射已有笔迹/AI 资产的坐标。
+// 所以上面的次序里“几何最先”同时意味着：**先定构图再落笔**；
+// 先画完再旋转，旧笔迹会落在转过之后的不同内容上。
 
 struct ImageDocument: Sendable {
     /// 工作分辨率的线性图（预览档）。导出时由 ExportPipeline 重新载入全量。
@@ -54,8 +68,78 @@ struct ImageDocument: Sendable {
     var oldPhotoRestore: Bool = false
     var oldPhotoScratchThreshold: Double = 0.15
 
+    /// 全部人脸的语义量（归一化坐标），按脸的面积从大到小排。
+    /// 由 478 点关键点逐张派生，存在文档里而不是只存在面板里：预览与
+    /// 导出都要用它，而它们只拿得到 document。
+    ///
+    /// 为什么是数组而不是单张：像素蛋糕的"逐脸自适应"意味着合影里
+    /// **每张脸都磨皮、每张脸都推形变**，只处理最大的那张脸的产品在
+    /// 家庭照上会明显露馅（爸爸的脸没动）。形变与区域美化本来就是把
+    /// 每张脸的锚点累加进同一个底座（位移场 / 权重图），多张脸只是多
+    /// 累加几笔，不需要第二套算子。
+    var faceGeometries: [FaceGeometry] = []
+
+    /// 主脸（面积最大的那张）的语义量。证件照构图、智能构图这类
+    /// "只有一个主体"的场景用它；区域美化/美型用整个 `faceGeometries`。
+    var faceGeometry: FaceGeometry? { faceGeometries.first }
+
+    /// 身形锚点（归一化坐标，17 点派生）。nil = 还没测过或没测到。
+    var bodyAnchors: BodyAnchors? = nil
+
+    /// 证件照排版。只挂导出（预览看的是单张构图，不是相纸）。
+    var idPhotoSheet: IDPhotoSheet? = nil
+
+    /// 拼图排版。同样只挂导出：预览看单张，拼图是"一次出片"而不是一个开关。
+    var collage: CollageComposition? = nil
+
     var canvasSize: PixelSize { linear.size }
     var hasPersonMask: Bool { personMask != nil }
+
+    /// 全部人脸框（归一化），给皮肤掩码分脸/身用。没有关键点就是空。
+    /// SkinMask 侧对多个框是"落在任一框内即算脸部"，所以合影里每张脸的
+    /// 脸部力度都作用于自己的脸，而不是只糊最大的一张。
+    var faceBoxes: [CGRect] {
+        faceGeometries.compactMap { geo -> CGRect? in
+            let bounds = geo.bounds
+            return (bounds.width > 0 && bounds.height > 0) ? bounds : nil
+        }
+    }
+
+    /// “开了开关但缺资产”的点名。预览底栏与导出报告共用这一份，
+    /// 因为“调了滑杆什么也没变”必须先被说清楚，而不是被归为“工具坏了”。
+    var pipelineWarnings: [String] {
+        var notes: [String] = []
+        let beauty = params.beauty
+        if !beauty.isRegionNeutral, faceGeometries.isEmpty {
+            notes.append("[no_landmarks] 没检测人脸关键点：亮眼/牙齿/唇色/腮红/祛黑眼圈/法令纹未生效")
+        }
+        if !beauty.isFaceShapeNeutral, faceGeometries.isEmpty {
+            notes.append("[no_landmarks] 没检测人脸关键点：瘦脸/大眼等美型未生效")
+        }
+        if !beauty.isBodyShapeNeutral, bodyAnchors == nil {
+            notes.append("[no_pose] 没检测身形关键点：瘦腰/长腿等美体未生效")
+        }
+        if !params.filter.isNeutral, FilterEngine.resolve(name: params.filter.style) == nil {
+            notes.append("[no_lut:\(params.filter.style)] 找不到这张滤镜表，已跳过滤镜")
+        }
+        if !beauty.isSkinNeutral, personMask == nil, faceGeometries.isEmpty {
+            notes.append("[no_constraint] 没有 α 也没有关键点：皮肤只按色域判，暖色背景会被连进去")
+        }
+        if params.bgEnabled, personMask == nil {
+            notes.append("[no_mask] 未抠图，换底色被跳过")
+        }
+        if let collage {
+            // 拼图只在导出时排版，但"图不够"这件事要提前说：底栏里看到
+            // `[collage_short]` 比导出后才知道少一张图便宜得多。
+            if CollageEngine.template(id: collage.templateID) == nil {
+                notes.append(CollageComposition.missingTemplateNote)
+            } else if let warning = collage.shortfallWarning(
+                slots: CollageEngine.template(id: collage.templateID)!.slots.count) {
+                notes.append(warning)
+            }
+        }
+        return notes
+    }
 
     init(loaded: LoadedImage, url: URL) {
         self.linear = loaded.linear
@@ -88,7 +172,10 @@ struct ImageDocument: Sendable {
 
     /// 预览/导出共用的一次渲染。返回显示码图（8bit 编码前）。
     func render(applyMask: Bool = true) -> DisplayImage {
-        var workingLinear = linear
+        // -1. 几何转正（旋转/翻转/裁剪）。最先做：它改画布尺寸，后面所有
+        //     归一化坐标指的都是用户看到的这一帧。恒等时整段跳过（不插值、
+        //     不重采样，中性图逐比特不变）。
+        var workingLinear = GeometryEngine.apply(geometry, to: linear)
 
         // 0. 老照片修复：褪色恢复 + 划痕去除。在调色之前——它改的是输入
         //    本身的化学褪变，不是创意调色。先修后调，调色才不会把褪色
@@ -107,6 +194,26 @@ struct ImageDocument: Sendable {
             display = LocalAdjustmentEngine.apply(display, adjustments: localAdjustments, linear: workingLinear)
         }
 
+        // 皮肤掩码：在滤镜之前判。风格会把整个色相分布推走，皮肤椭圆
+        // 门限在推之前的色调上才是调好的那一个。算一次就用到底（美肤与
+        // 导出报告共用），所以它不是“顺便算算”，而是被开关闸住的必经步。
+        let skinLayers: SkinMask.Layers?
+        if params.beauty.isSkinNeutral {
+            skinLayers = nil
+        } else {
+            skinLayers = SkinMask.build(display, personMask: personMask, faceBoxes: faceBoxes)
+        }
+
+        // 滤镜/LUT：逐点映射，在任何读邻域的算子之前做（它只改颜色不改结构）。
+        if !params.filter.isNeutral, let lut = FilterEngine.resolve(name: params.filter.style) {
+            display = FilterEngine.apply(display, lut: lut, strength: params.filter.strength)
+        }
+
+        // 镜头几何：畸变与色差。在笔刷之前——它们改像素位置。
+        if !params.lens.isGeometryNeutral {
+            display = LensEngine.applyGeometry(display, lens: params.lens)
+        }
+
         // 空间滤波：先降噪再锐化（反过来等于先把噪声锐化一遍）。
         // 放在补丁合成**之前**：补丁是 AI 的输出（本身干净而锐利），
         // 不该被再降噪一次或再锐化一次——那会让“修过的区域”和周围质感不一。
@@ -120,12 +227,27 @@ struct ImageDocument: Sendable {
             }
         }
 
-        // 笔刷：液化先于图章。液化改变像素位置，图章按位置从当前画面取样——
-        // 反过来则图章搬进去的内容会被随后的位移场再次推走。
-        if !brush.liquify.isEmpty || !brush.stamps.isEmpty {
-            // 两个工具共用同一张保护掩码（保护笔刷对两者都成立，不该各涂一遍），
-            // 所以只按当前画布栅格化一次。
+        // 皮肤精修。在降噪之后：磨皮自己就是保边平滑，先把传感器噪声降噪
+        // 一遍再磨，比拿噪声去调“纹理保留量”稳定得多。
+        if let skinLayers {
+            display = BeautyEngine.apply(display, skin: skinLayers, beauty: params.beauty)
+        }
+
+        // 五官区域美化（亮眼/牙齿/唇色/腮红/祛黑眼圈/法令纹）：逐张脸都做，
+        // 一张关键点都给不出就整段跳过。
+        if !params.beauty.isRegionNeutral {
+            display = RegionEnhance.apply(display, geometries: faceGeometries, beauty: params.beauty)
+        }
+
+        // 形变类：美型预设 → 手动液化 → 仿制图章。
+        // 预设排在手动之前：手动笔迹是用户“对着当前画面推”的结果，
+        // 它必须是最后一位挪像素的人；保护掩码三者共用，只栅格化一次。
+        if !params.beauty.isShapeNeutral || !brush.liquify.isEmpty || !brush.stamps.isEmpty {
             let protectionMask = brush.protectionMask(for: display.size)
+            if !params.beauty.isShapeNeutral {
+                display = ShapeWarp.apply(display, faces: faceGeometries, body: bodyAnchors,
+                                          beauty: params.beauty, protection: protectionMask)
+            }
             if !brush.liquify.isEmpty {
                 display = LiquifyEngine.apply(display, strokes: brush.liquify, protection: protectionMask)
             }
@@ -160,6 +282,11 @@ struct ImageDocument: Sendable {
 
         if applyMask, params.bgEnabled, let mask = personMask {
             display = Self.replaceBackground(display: display, mask: mask, params: params)
+        }
+
+        // 暗角与颗粒：输出层，最后一道。
+        if !params.lens.isOverlayNeutral {
+            display = LensEngine.applyOverlay(display, lens: params.lens)
         }
         return display
     }

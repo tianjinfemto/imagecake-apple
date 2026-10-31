@@ -41,7 +41,9 @@ struct CanvasView: View {
 
     private var image: CGImage? { model.preview }
     private var maskOverlay: CGImage? { model.maskOverlay }
+    private var clippingOverlay: CGImage? { model.clippingOverlay }
     private var showMask: Bool { model.showMask }
+    private var showClipping: Bool { model.showClipping }
     private var selectionEnabled: Bool { model.selectionMode }
 
     private var isBrushing: Bool { model.brushTool != .none && !model.clonePickingMode }
@@ -67,6 +69,17 @@ struct CanvasView: View {
                         .resizable()
                         .interpolation(.medium)
                         .opacity(0.45)
+                        .frame(width: viewport.imageRect.width, height: viewport.imageRect.height)
+                        .position(x: viewport.imageRect.midX, y: viewport.imageRect.midY)
+                        .allowsHitTesting(false)
+                }
+                if showClipping, let clippingOverlay {
+                    // 溢出高亮盖在最上层（除了选框）：它标的是"结果像素"，
+                    // 拿遮罩叠在下面会被掩码混色看不准。
+                    Image(decorative: clippingOverlay, scale: 1)
+                        .resizable()
+                        .interpolation(.none)
+                        .opacity(0.85)
                         .frame(width: viewport.imageRect.width, height: viewport.imageRect.height)
                         .position(x: viewport.imageRect.midX, y: viewport.imageRect.midY)
                         .allowsHitTesting(false)
@@ -228,7 +241,7 @@ struct CanvasView: View {
         switch model.brushTool {
         case .liquify:
             if brushFrom == nil { brushFrom = normalized }
-        case .protection, .cloneStamp:
+        case .protection, .cloneStamp, .localMask:
             brushPoints.append(normalized)
         case .none:
             break
@@ -273,6 +286,13 @@ struct CanvasView: View {
             model.addCloneStamp(CloneStamp(source: source, points: sampled,
                                            radius: radius, strength: strength,
                                            hardness: hardness))
+        case .localMask:
+            // 画笔蒙版不直接落笔到文档：本地调节是 (选区, 参数集) 对，
+            // 参数集只能在面板里给，所以这一笔先进成“待用选区”。
+            let maskPoints = StrokeSampler.resample(brushPoints, minSpacing: radius * 0.5)
+            guard maskPoints.count >= 1 else { return }
+            model.setPendingLocalStroke(BrushStroke(points: maskPoints,
+                                                    radius: radius, hardness: hardness))
         case .none:
             break
         }

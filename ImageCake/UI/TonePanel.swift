@@ -7,12 +7,15 @@ import SwiftUI
 // 缺的只是入口——所以 ColorGradingPanel 只负责把已有的算子接到滑杆上。
 // 空间滤波要读邻域，不在 ToneEngine 的逐像素循环里，面板上仍然是两个滑杆。
 // 背景与 AI 相关的入口都在 AI 面板，这里只管“颜色与细节”。
+// 直方图放在本栏最前：它是调色结果的反馈，而不是一又一个工具。
 
 struct TonePanel: View {
     @EnvironmentObject private var model: EditorModel
 
     var body: some View {
         VStack(spacing: 12) {
+            HistogramView().environmentObject(model)
+
             SectionCard(title: "基础", subtitle: "线性 → 显示") {
                 SliderRow(title: "曝光", range: -2 ... 2, step: 0.05,
                           format: { String(format: "%+.2f EV", $0) },
@@ -47,8 +50,8 @@ struct TonePanel: View {
 
             ColorGradingPanel().environmentObject(model)
 
-            SectionCard(title: "关于这版", subtitle: "v1 边界") {
-                Text("本地滤镜表（.cube）、XMP 与批量不在 v1；旋转/裁剪会改画布尺寸，需与重采集同批。")
+            SectionCard(title: "这一栏不做什么", subtitle: "分工") {
+                Text("这一栏只管颜色与细节。滤镜/LUT、镜头校正与局部蒙版在「风格」，皮肤与形体在「人像」，批量在「批量」。旋转/裁剪会改画布尺寸，所以放在「工具」而不是这里：它改的是“坐标系”，不是“参数”。")
                     .font(.system(size: 10))
                     .foregroundStyle(Tokens.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)

@@ -23,6 +23,16 @@ struct BatchConfig: Sendable {
     var maxEdge: Int = 0
     var outputDirectory: URL
     var namingTemplate: String = "{stem}_edited.{ext}"
+    /// 同步组。像素蛋糕式"一张调好→其余抄过去"的闸门：
+    /// 调色/美肤/美型可以抄，手动液化与修复补丁**从来不在参数里**，
+    /// 所以这个类型想抄也抄不走（见 ParamSync 顶部注释）。
+    /// nil = 全部抄（[.all]）。
+    var groups: SyncGroups? = nil
+
+    /// 实际落到每张图上的参数（按组收敛后的结果）。
+    var effectiveParams: EditParameters {
+        ParamSync.merge(source: params, into: EditParameters(), groups: groups ?? .all)
+    }
 }
 
 struct BatchReport: Sendable {
@@ -49,7 +59,7 @@ enum BatchQueue {
             do {
                 let loaded = try await ImageLoader.load(url: item.url, maxEdge: 0)
                 var doc = ImageDocument(loaded: loaded, url: item.url)
-                doc.params = config.params
+                doc.params = config.effectiveParams
 
                 let outcome = await ExportPipeline.render(doc, store: store, ort: ort, fullResolution: false)
                 let data = try ExportPipeline.encode(outcome, format: config.format,

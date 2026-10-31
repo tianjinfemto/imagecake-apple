@@ -65,10 +65,11 @@ enum PresetStore {
             warning = "已忽略 \(unknown.count) 个本程序没有落点的键：\(unknown.joined(separator: ", "))"
         }
         if !params.requires.isEmpty {
-            // v1 不加载 lut/追色/天空表：点名告诉用户"这份预设带外部资产"，
-            // 而不是让滤镜悄悄消失。
+            // lut 已经能加载（内置风格直接算，导入的按名字到 LUTs 目录找），
+            // 但预设里只存名字不存字节：这里点名“依赖外部资产”，
+            // 让滤镜在换设备后默默消失这件事有个可见的出口。
             let assets = params.requires.joined(separator: ", ")
-            warning += (warning.isEmpty ? "" : "；") + "这份预设依赖外部资产：\(assets)（v1 未加载）"
+            warning += (warning.isEmpty ? "" : "；") + "这份预设依赖外部资产：\(assets)（lut: 名字可在「风格」面板导入同名 .cube；其余类型本仓不加载）"
         }
         return (params, PresetLoadReport(version: version, unknownKeys: unknown, warning: warning))
     }

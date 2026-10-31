@@ -91,6 +91,11 @@ public struct EditParameters: Equatable, Sendable {
     /// 它只在有人像 α 且真要换底/虚化时才有意义，所以不参与 isDisplayNeutral。
     public var defringe: Double = 0        // 0...100
 
+    // —— 人像精修 / 滤镜 / 镜头（本仓扩展三组，见 BeautyParameters） ——
+    public var beauty = BeautyParameters()
+    public var filter = FilterParameters()
+    public var lens = LensParameters()
+
     // —— 交付端 ——
     public var faceRestore: Double = 0     // 0...100，只挂导出
     public var superRes: Int = 0           // 0/2/4，只挂导出
@@ -128,8 +133,13 @@ public struct EditParameters: Equatable, Sendable {
         denoise == 0 && sharpen == 0
     }
 
+    /// 人像三组是否全关。皮肤/美型活在 ToneEngine 之外，所以单独谓词。
+    public var isBeautyNeutral: Bool { beauty.isNeutral }
+
     public var isNeutral: Bool {
-        isLinearNeutral && isDisplayNeutral && isSpatialNeutral && faceRestore == 0 && superRes == 0
+        isLinearNeutral && isDisplayNeutral && isSpatialNeutral
+            && beauty.isNeutral && filter.isNeutral && lens.isNeutral
+            && faceRestore == 0 && superRes == 0
     }
 
     /// 面板/批量用的夹取：坏值不静默通过，一律收敛到算子能吃的区间。
@@ -155,6 +165,9 @@ public struct EditParameters: Equatable, Sendable {
         bgR = bgR.clamped(to: 0 ... 255); bgG = bgG.clamped(to: 0 ... 255); bgB = bgB.clamped(to: 0 ... 255)
         bgBlur = bgBlur.clamped(to: 0 ... 100)
         defringe = defringe.clamped(to: 0 ... 100)
+        beauty.clamp()
+        filter.clamp()
+        lens.clamp()
         faceRestore = faceRestore.clamped(to: 0 ... 100)
         if ![0, 2, 4].contains(superRes) { superRes = 0 }
     }
@@ -191,6 +204,7 @@ extension EditParameters: Codable {
         case curveX = "curve_x", curveY = "curve_y"
         case bgEnabled = "bg_enabled", bgR = "bg_r", bgG = "bg_g", bgB = "bg_b", bgBlur = "bg_blur"
         case defringe
+        case beauty, filter, lens
         case faceRestore = "face_restore"
         case superRes = "super_res"
         case presetVersion = "preset_version"
@@ -207,6 +221,9 @@ extension EditParameters: Codable {
         "denoise", "sharpen",
         "curve_x", "curve_y", "bg_enabled", "bg_r", "bg_g", "bg_b", "bg_blur",
         "defringe",
+        // 三组嵌套键。读旧文件缺它们 → 落出厂值（全关）；写出去给旧程序读会被
+        // 点名为未知键，这是故意的（见 BeautyParameters 顶部注释）。
+        "beauty", "filter", "lens",
         "face_restore", "super_res", "preset_version", "requires"
     ]
 
@@ -250,6 +267,9 @@ extension EditParameters: Codable {
         bgB = try c.decodeIfPresent(Double.self, forKey: .bgB) ?? bgB
         bgBlur = try c.decodeIfPresent(Double.self, forKey: .bgBlur) ?? bgBlur
         defringe = try c.decodeIfPresent(Double.self, forKey: .defringe) ?? defringe
+        beauty = try c.decodeIfPresent(BeautyParameters.self, forKey: .beauty) ?? beauty
+        filter = try c.decodeIfPresent(FilterParameters.self, forKey: .filter) ?? filter
+        lens = try c.decodeIfPresent(LensParameters.self, forKey: .lens) ?? lens
         faceRestore = try c.decodeIfPresent(Double.self, forKey: .faceRestore) ?? faceRestore
         superRes = try c.decodeIfPresent(Int.self, forKey: .superRes) ?? superRes
         presetVersion = try c.decodeIfPresent(Int.self, forKey: .presetVersion) ?? presetVersion
@@ -283,6 +303,9 @@ extension EditParameters: Codable {
         try c.encode(bgB, forKey: .bgB)
         try c.encode(bgBlur, forKey: .bgBlur)
         try c.encode(defringe, forKey: .defringe)
+        try c.encode(beauty, forKey: .beauty)
+        try c.encode(filter, forKey: .filter)
+        try c.encode(lens, forKey: .lens)
         try c.encode(faceRestore, forKey: .faceRestore)
         try c.encode(superRes, forKey: .superRes)
         try c.encode(presetVersion, forKey: .presetVersion)
