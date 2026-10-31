@@ -230,7 +230,7 @@ final class StyleWorkflowTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(rect.minY, 0)
         XCTAssertLessThanOrEqual(rect.maxY, 1)
         let frameHeightPixels = rect.height * CGFloat(canvas.height)
-        XCTAssertEqual(head.height / Double(frameHeightPixels), spec.headRatio, accuracy: 0.02)
+        XCTAssertEqual(Double(head.height) / Double(frameHeightPixels), spec.headRatio, accuracy: 0.02)
         // 头顶留白约 8%：框顶要在头顶之上一点。
         XCTAssertLessThan(rect.minY * CGFloat(canvas.height), CGFloat(head.y))
     }
