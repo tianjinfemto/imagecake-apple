@@ -314,11 +314,16 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p build
+          # ENABLE_TESTABILITY=YES 是必需的：Release 默认关掉它，而测试靠
+          # `@testable import ImageCake` 访问 internal 成员，不打开报的是
+          # "module 'ImageCake' was not compiled for testing"（本 job 第一次跑就踩到了）。
+          # 它只打开符号可见性，不改优化级别，所以量出来的仍然是 Release 的数。
           xcodebuild \
             -project ImageCake.xcodeproj \
             -scheme ImageCake \
             -destination 'platform=macOS' \
             -configuration Release \
+            ENABLE_TESTABILITY=YES \
             -derivedDataPath build/PerfDerived \
             -only-testing:ImageCakeTests/RenderBenchmarkTests \
             -only-testing:ImageCakeTests/RenderPrimitivesBenchmarkTests \
