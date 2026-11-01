@@ -383,6 +383,42 @@ extension ColorMatchParameters: Codable {
     }
 }
 
+// MARK: - 身体细纹（颈纹 / 妊娠纹）
+
+/// 涂一片皮肤，只把那里的**细暗线**填掉（颈纹、妊娠纹、疤痕同一类）。
+///
+/// 为什么不自动：哪些线是纹、哪些是身体自身的结构阴影（锁骨、孕肚轮廓），
+/// 在没有分割权重的情况下从图里看不出来。自动版把低频阴影一起抹平的代价
+/// 是把人抹“扁”，比留几条纹严重得多。选区由用户涂，力度可同步（见 ParamSync）。
+public struct BodyLineParameters: Equatable, Sendable {
+    /// 0…100 祛细纹力度。与法令纹共用同一个算子（`RegionEnhance.thinDarkLinePass`）。
+    public var deLine: Double = 0
+
+    public init() {}
+
+    public var isNeutral: Bool { deLine == 0 }
+
+    public mutating func clamp() {
+        deLine = deLine.clamped(to: 0 ... 100)
+    }
+}
+
+extension BodyLineParameters: Codable {
+    enum CodingKeys: String, CodingKey { case deLine = "de_line" }
+
+    public init(from decoder: Decoder) throws {
+        self.init()
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        deLine = try c.decodeIfPresent(Double.self, forKey: .deLine) ?? deLine
+        clamp()
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(deLine, forKey: .deLine)
+    }
+}
+
 // MARK: - hex 颜色工具
 
 /// 24bit hex ↔ 归一 RGB。妆容/天空的颜色落盘走 hex，因此这里的换算必须

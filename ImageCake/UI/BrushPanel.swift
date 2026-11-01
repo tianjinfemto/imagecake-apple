@@ -153,7 +153,9 @@ struct BrushPanel: View {
         case .localMask:
             return "画笔蒙版：涂一笔当作本地调节的选区，再到「风格」面板给它一组参数。选区与参数分两步，因为同一个选区往往会反复改参数。"
         case .garment:
-            return "衣物区：在要熨的褶子上涂一块，再去「造型」面板推「祛褶」。要涂而不自动：分辨褶子与接缝/图案/腰带阴影需要服装分割，自动会把不该平的地方平掉。"
+            return "衣物区：在要熨的褶子上涂一块，再去「造型」面板推「衣物平整」。要涂而不自动：分辨褶子与接缝/图案/腰带阴影需要服装分割，自动会把不该平的地方平掉。"
+        case .bodyLine:
+            return "细纹区：在颈纹/妊娠纹上涂一块，再去「美妆」面板推「祛细纹」。要涂而不自动：哪些线是纹、哪些是身体自身的结构阴影（锁骨、孕肚轮廓）从图里看不出来，自动抹会把人抹扁。"
         }
     }
 
@@ -163,7 +165,8 @@ struct BrushPanel: View {
         let s = brush?.stamps.count ?? 0
         let p = brush?.protection.count ?? 0
         let g = brush?.garments.count ?? 0
-        return "液\(l) · 章\(s) · 护\(p) · 衣\(g)"
+        let n = brush?.lines.count ?? 0
+        return "液\(l) · 章\(s) · 护\(p) · 衣\(g) · 纹\(n)"
     }
 
     private func brushCount(_ kind: EditorModel.BrushKind) -> Int {
@@ -173,7 +176,9 @@ struct BrushPanel: View {
         case .stamps: return brush.stamps.count
         case .protection: return brush.protection.count
         case .garments: return brush.garments.count
-        case .all: return brush.liquify.count + brush.stamps.count + brush.protection.count + brush.garments.count
+        case .lines: return brush.lines.count
+        case .all: return brush.liquify.count + brush.stamps.count + brush.protection.count
+            + brush.garments.count + brush.lines.count
         }
     }
 }

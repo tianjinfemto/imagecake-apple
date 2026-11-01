@@ -484,6 +484,7 @@ final class EditorModel: ObservableObject {
         case .stamps: doc.brush.stamps = []
         case .protection: doc.brush.protection = []
         case .garments: doc.brush.garments = []
+        case .lines: doc.brush.lines = []
         case .all: doc.brush = BrushState()
         }
         document = doc
@@ -493,13 +494,14 @@ final class EditorModel: ObservableObject {
     }
 
     enum BrushKind: CaseIterable {
-        case liquify, stamps, protection, garments, all
+        case liquify, stamps, protection, garments, lines, all
         var title: String {
             switch self {
             case .liquify: return "液化笔迹"
             case .stamps: return "图章笔迹"
             case .protection: return "保护笔刷"
             case .garments: return "衣物区"
+            case .lines: return "细纹区"
             case .all: return "全部笔刷"
             }
         }
@@ -508,7 +510,7 @@ final class EditorModel: ObservableObject {
     /// 画布上的当前工具。.none 时单指拖走框选（智能消除用），
     /// 其余几个走各自的笔刷落笔。
     enum BrushTool: CaseIterable {
-        case none, liquify, cloneStamp, protection, localMask, garment
+        case none, liquify, cloneStamp, protection, localMask, garment, bodyLine
         var title: String {
             switch self {
             case .none: return "无"
@@ -517,6 +519,7 @@ final class EditorModel: ObservableObject {
             case .protection: return "保护"
             case .localMask: return "选区"
             case .garment: return "衣物"
+            case .bodyLine: return "细纹"
             }
         }
         var icon: String {
@@ -527,6 +530,7 @@ final class EditorModel: ObservableObject {
             case .protection: return "shield"
             case .localMask: return "circle.dashed"
             case .garment: return "tshirt"
+            case .bodyLine: return "waveform.path.ecg"
             }
         }
     }
@@ -1053,7 +1057,7 @@ final class EditorModel: ObservableObject {
         }
     }
 
-    /// 涂一笔衣物区（祛褶只在这里生效）。与保护/选区同一类：只存笔迹。
+    /// 涂一笔衣物区（平整只在这里生效）。与保护/选区同一类：只存笔迹。
     func addGarmentStroke(_ stroke: BrushStroke) {
         mutateDocument { $0.brush.garments.append(stroke) }
         commitHistoryNow()
@@ -1066,6 +1070,21 @@ final class EditorModel: ObservableObject {
         commitHistoryNow()
         scheduleRender()
         status = "已清除衣物区"
+    }
+
+    /// 涂一笔细纹区（颈纹/妊娠纹）。与衣物区同一类：只存笔迹，没涂就整段不跑。
+    func addLineStroke(_ stroke: BrushStroke) {
+        mutateDocument { $0.brush.lines.append(stroke) }
+        commitHistoryNow()
+        scheduleRender()
+        status = "细纹区 \(document?.brush.lines.count ?? 0) 笔"
+    }
+
+    func clearLineStrokes() {
+        mutateDocument { $0.brush.lines = [] }
+        commitHistoryNow()
+        scheduleRender()
+        status = "已清除细纹区"
     }
 
     // MARK: - AI：手部 / 天空 / 多帧堆栈

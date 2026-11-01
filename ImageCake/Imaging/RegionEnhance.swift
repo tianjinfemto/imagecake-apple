@@ -238,7 +238,19 @@ enum RegionEnhance {
                                geometries: [FaceGeometry], amount: Double) {
         guard amount > 0, size.pixelCount > 0 else { return }
         let weight = unionWeight(size: size, geometries) { nasolabialWeights($0, size: size) }
-        guard weight.count == size.pixelCount else { return }
+        thinDarkLinePass(&pixels, size: size, weight: weight, amount: amount)
+    }
+
+    /// 细暗线填充的**公用核心**（祛法令纹、颈纹/妊娠纹共用一份数学）。
+    ///
+    /// 只把"比低频邻域暗得多的细线"向低频填：方向上不碰亮线（眼袋亮边、
+    /// 鼻翼高光），频域上只允许一几个像素宽的结构（半径 = 长边的 1.2%）。
+    /// 半径一大，低频场就会连脸型的明暗一起抹平，症状是"纹淡了但脸也扁了"——
+    /// 颈纹/妊娠纹也是同一个取舍，所以抽成一个函数而不是各写一版。
+    static func thinDarkLinePass(_ pixels: inout [Float], size: PixelSize,
+                                 weight: [Float], amount: Double) {
+        guard amount > 0, size.pixelCount > 0, weight.count == size.pixelCount,
+              pixels.count >= size.pixelCount * 4 else { return }
         var maxWeight = Float(0)
         for value in weight { maxWeight = Swift.max(maxWeight, value) }
         guard maxWeight > 0 else { return }

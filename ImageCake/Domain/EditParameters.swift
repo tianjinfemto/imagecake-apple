@@ -105,6 +105,9 @@ public struct EditParameters: Equatable, Sendable {
     public var garment = GarmentParameters()
     public var sky = SkyParameters()
     public var light = LightParameters()
+    /// 身体细纹（颈纹/妊娠纹）。与衣物祛褶同类：都要人先涂一块，区别在算子
+    /// （一个是二频段推平，一个是只填细暗线）。
+    public var bodyLine = BodyLineParameters()
     /// 追色（样片对齐）。它跟上面六组不同类：不靠区域、不靠关键点，
     /// 只靠**另一张图**，所以单独一组、单独一个资产闸门。
     public var colorMatch = ColorMatchParameters()
@@ -154,6 +157,7 @@ public struct EditParameters: Equatable, Sendable {
     public var isSceneNeutral: Bool {
         makeup.isNeutral && hair.isNeutral && hand.isNeutral
             && garment.isNeutral && sky.isNeutral && light.isNeutral
+            && bodyLine.isNeutral
     }
 
     public var isNeutral: Bool {
@@ -195,6 +199,7 @@ public struct EditParameters: Equatable, Sendable {
         garment.clamp()
         sky.clamp()
         light.clamp()
+        bodyLine.clamp()
         colorMatch.clamp()
         faceRestore = faceRestore.clamped(to: 0 ... 100)
         if ![0, 2, 4].contains(superRes) { superRes = 0 }
@@ -237,6 +242,8 @@ extension EditParameters: Codable {
         case makeup, hair, hand, garment, sky, light
         // 追色。与本仓其余扩展组同一待遇：对方读到会点名为未知键。
         case colorMatch = "color_match"
+        // 身体细纹（颈纹/妊娠纹）。
+        case bodyLine = "body_line"
         case faceRestore = "face_restore"
         case superRes = "super_res"
         case presetVersion = "preset_version"
@@ -259,7 +266,7 @@ extension EditParameters: Codable {
         // 造型与场景六组。与上面三组同理：它们是本仓扩展，对方读到会点名为
         // 未知键，而不是猜这些值是什么意思。
         "makeup", "hair", "hand", "garment", "sky", "light",
-        "color_match",
+        "color_match", "body_line",
         "face_restore", "super_res", "preset_version", "requires"
     ]
 
@@ -313,6 +320,7 @@ extension EditParameters: Codable {
         sky = try c.decodeIfPresent(SkyParameters.self, forKey: .sky) ?? sky
         light = try c.decodeIfPresent(LightParameters.self, forKey: .light) ?? light
         colorMatch = try c.decodeIfPresent(ColorMatchParameters.self, forKey: .colorMatch) ?? colorMatch
+        bodyLine = try c.decodeIfPresent(BodyLineParameters.self, forKey: .bodyLine) ?? bodyLine
         faceRestore = try c.decodeIfPresent(Double.self, forKey: .faceRestore) ?? faceRestore
         superRes = try c.decodeIfPresent(Int.self, forKey: .superRes) ?? superRes
         presetVersion = try c.decodeIfPresent(Int.self, forKey: .presetVersion) ?? presetVersion
@@ -356,6 +364,7 @@ extension EditParameters: Codable {
         try c.encode(sky, forKey: .sky)
         try c.encode(light, forKey: .light)
         try c.encode(colorMatch, forKey: .colorMatch)
+        try c.encode(bodyLine, forKey: .bodyLine)
         try c.encode(faceRestore, forKey: .faceRestore)
         try c.encode(superRes, forKey: .superRes)
         try c.encode(presetVersion, forKey: .presetVersion)

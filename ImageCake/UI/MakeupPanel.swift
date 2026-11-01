@@ -38,6 +38,7 @@ struct MakeupPanel: View {
             hairSection
             handSection
             garmentSection
+            lineSection
         }
     }
 
@@ -170,6 +171,37 @@ struct MakeupPanel: View {
 
     private var garmentSubtitle: String {
         let strokes = model.document?.brush.garments.count ?? 0
+        return strokes == 0 ? "未涂选区" : "已涂 \(strokes) 笔"
+    }
+
+    // MARK: - 身体细纹
+
+    private var lineSection: some View {
+        SectionCard(title: "颈纹/妊娠纹", subtitle: lineSubtitle) {
+            SliderRow(title: "祛细纹", range: 0 ... 100, value: double(\.bodyLine.deLine))
+            HStack(spacing: 8) {
+                Button {
+                    model.brushTool = .bodyLine
+                } label: {
+                    Label("去画布涂一块", systemImage: "waveform.path.ecg")
+                }
+                .buttonStyle(.bordered)
+                .disabled(!model.hasImage)
+                Button("清除细纹区") { model.clearLineStrokes() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled((model.document?.brush.lines.isEmpty ?? true) || model.busy != nil)
+            }
+            Text("与法令纹同一个算子：只把比低频邻域暗得多的**细线**向低频填，低频阴影逐比特不动。所以涂在锁骨阴影或孕肚轮廓上不会把人抹扁，涂在纹上才会淡。不做自动检出：身体部位没有可靠关键点，而区分纹与结构阴影需要的信息图里没有。")
+                .font(.system(size: 10))
+                .foregroundStyle(Tokens.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            notesRow(model.pipelineNotes.filter { $0.contains("[no_line_region]") })
+        }
+    }
+
+    private var lineSubtitle: String {
+        let strokes = model.document?.brush.lines.count ?? 0
         return strokes == 0 ? "未涂选区" : "已涂 \(strokes) 笔"
     }
 

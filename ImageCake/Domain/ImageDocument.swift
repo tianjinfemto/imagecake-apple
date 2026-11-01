@@ -175,7 +175,10 @@ struct ImageDocument: Sendable {
             notes.append("[no_hand] 没检测到手：手部美化未生效（Vision 手部姿态，零权重）")
         }
         if !garment.isNeutral, brush.garments.isEmpty {
-            notes.append("[no_garment_region] 没涂衣物区：祛褶要先在画面上涂一块（全自动需要服装分割权重）")
+            notes.append("[no_garment_region] 没涂衣物区：衣物平整要先在画面上涂一块（全自动需要服装分割权重）")
+        }
+        if !params.bodyLine.isNeutral, brush.lines.isEmpty {
+            notes.append("[no_line_region] 没涂细纹区：颈纹/妊娠纹要先在皮肤上涂一块（自动检出会把结构阴影一起抹平，不做）")
         }
         if !sky.isNeutral, skyMask == nil {
             notes.append("[no_sky_mask] 还没检测天空：换天空未生效")
@@ -355,6 +358,14 @@ struct ImageDocument: Sendable {
         if !params.garment.isNeutral, let garmentMask = brush.garmentMask(for: display.size) {
             display = GarmentEngine.apply(display, weights: SkinMask.weights(garmentMask, size: display.size),
                                           garment: params.garment)
+        }
+
+        // 身体细纹（颈纹/妊娠纹）：紧跟衣物那一类。两者同为"涂一块 + 只动那一块
+        // 的某种结构"，而且都用当前画面做低频参考，所以必须在任何会搬运像素的
+        // 算子（液化/图章）之后，不然涂的块和实际被改的位置不是同一处。
+        if !params.bodyLine.isNeutral, let lineMask = brush.lineMask(for: display.size) {
+            display = LineEngine.apply(display, weights: SkinMask.weights(lineMask, size: display.size),
+                                       lines: params.bodyLine)
         }
 
         // 修补笔迹（同图取样）：在图章之后、补丁之前。图章和修补都是

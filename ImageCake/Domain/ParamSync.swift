@@ -106,6 +106,9 @@ enum ParamSync {
             // 涂的那一块本身同步不了（在 BrushState 里），这是故意的：
             // 上一张的褶子在左肩，下一张的褶子不会也在左肩。
             out.garment = source.garment
+            // 颈纹/妊娠纹同理：力度可同步（全批按同一个深浅填细线），
+            // 涂在哪一块不可同步（逐张的身体不一样）。
+            out.bodyLine = source.bodyLine
         }
         if groups.contains(.style) {
             out.filter = source.filter

@@ -241,7 +241,7 @@ struct CanvasView: View {
         switch model.brushTool {
         case .liquify:
             if brushFrom == nil { brushFrom = normalized }
-        case .protection, .cloneStamp, .localMask, .garment:
+        case .protection, .cloneStamp, .localMask, .garment, .bodyLine:
             brushPoints.append(normalized)
         case .none:
             break
@@ -298,6 +298,11 @@ struct CanvasView: View {
             let points = StrokeSampler.resample(brushPoints, minSpacing: radius * 0.5)
             guard points.count >= 1 else { return }
             model.addGarmentStroke(BrushStroke(points: points, radius: radius, hardness: hardness))
+        case .bodyLine:
+            // 细纹区（颈纹/妊娠纹）：与衣物区完全同构，只是走的算子不同。
+            let points = StrokeSampler.resample(brushPoints, minSpacing: radius * 0.5)
+            guard points.count >= 1 else { return }
+            model.addLineStroke(BrushStroke(points: points, radius: radius, hardness: hardness))
         case .none:
             break
         }

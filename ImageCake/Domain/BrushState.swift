@@ -25,14 +25,25 @@ struct BrushState: Equatable, Sendable {
     /// 所以进 BrushState 而不是 GarmentParameters——预设同步抢不走它，
     /// 而这是对的：批里另一张衣服褶不在这个位置。
     var garments: [BrushStroke] = []
-
-    var isEmpty: Bool { liquify.isEmpty && stamps.isEmpty && protection.isEmpty && garments.isEmpty }
-
+    /// 身体细纹（颈纹/妊娠纹）的涂抹区。与衣物区同一条理由进 BrushState 而不是参数：
+    /// 这一张的颈纹在哪个位置是逐张的历史，同步抢不走也不应该抢。
+    var lines: [BrushStroke] = []
+    
+    var isEmpty: Bool {
+        liquify.isEmpty && stamps.isEmpty && protection.isEmpty && garments.isEmpty && lines.isEmpty
+    }
+    
     /// 涂过的衣物区（当前画布下的掩码）。没涂就是 nil，而不是全零掩码——
     /// 没选区时祛褶整段不跑，并点名 `[no_garment_region]`。
     func garmentMask(for size: PixelSize) -> MaskBuffer? {
         guard !garments.isEmpty else { return nil }
         return StrokeRasterizer.mask(strokes: garments, size: size)
+    }
+    
+    /// 涂过的细纹区。同样“没涂 = nil”，没选区时整段不跑并点名 `[no_line_region]`。
+    func lineMask(for size: PixelSize) -> MaskBuffer? {
+        guard !lines.isEmpty else { return nil }
+        return StrokeRasterizer.mask(strokes: lines, size: size)
     }
 
     /// 当前画布下的保护掩码。没涂保护笔刷时是 nil，而不是全零掩码——
