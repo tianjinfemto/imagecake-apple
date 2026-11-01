@@ -124,6 +124,14 @@ struct ImageDocument: Sendable {
     var pipelineWarnings: [String] {
         var notes: [String] = []
         let beauty = params.beauty
+        // 造型与场景六组住在 `params` 里，不是 document 自己的字段：
+        // 这里先命名一份局部别名，避开在下面六处重复写 `params.`。
+        let makeup = params.makeup
+        let hair = params.hair
+        let hand = params.hand
+        let garment = params.garment
+        let sky = params.sky
+        let light = params.light
         if !beauty.isRegionNeutral, faceGeometries.isEmpty {
             notes.append("[no_landmarks] 没检测人脸关键点：亮眼/牙齿/唇色/腮红/祛黑眼圈/法令纹未生效")
         }

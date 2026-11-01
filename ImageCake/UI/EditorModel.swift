@@ -1182,7 +1182,7 @@ final class EditorModel: ObservableObject {
             item.skyMask = nil
             item.skyPhoto = nil
         }
-        exportNotes = [LongExposureEngine.report(result)] + (skipped.isEmpty ? [] : ["[stack_skipped] \(skipped.count) 张读不了")]
+        exportNotes = [LongExposureEngine.report(result)] + (skipped.isEmpty ? [] : ["[stack_skipped] \(skipped.count) 张读不了"])
         await renderNow()
         status = "\(result.frames) 帧堆栈完成（\(mode.title)）· \(stem)"
     }

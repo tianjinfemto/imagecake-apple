@@ -149,8 +149,11 @@ final class TetherCapture: NSObject, AVCapturePhotoCaptureDelegate {
 
     // MARK: - AVCapturePhotoCaptureDelegate
 
-    func capture(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto,
-                 error: Error?) {
+    /// 方法名必须是 `photoOutput(_:didFinishProcessingPhoto:error:)`。
+    /// 写成 `capture(...)` 只会得到一个"nearly matches optional requirement"警告，
+    /// 而不是错 —— 症状是快门按了但永远等不到回片，最后报 `[camera_timeout]`。
+    func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto,
+                     error: Error?) {
         lock.lock()
         defer { lock.unlock() }
         if let error {
