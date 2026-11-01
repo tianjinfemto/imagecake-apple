@@ -71,10 +71,12 @@ final class SceneFeatureTests: XCTestCase {
         XCTAssertGreaterThan(lips[lipPeak], 0.4, "唇环必须有实权重")
         XCTAssertGreaterThan(brow[browPeak], 0.4, "眉带必须有实权重")
         // 眉带必须落在眼睛上方（主峰 y 小于虹膜 y）。这条抓的是"眉毛索引错了"。
-        // 主峰行必须在虹膜上方。先把下标**按 Double 除**回归一化 y —— 写成
-        // `browPeak / size.width` 是整数除法，商被截断后这个比较本身就失真。
-        let irisY = geometry.irisCenters[0].y * CGFloat(size.height)
-        XCTAssertLessThan(Double(browPeak) / Double(size.width), Double(irisY).rounded(.down) / Double(size.height) - 0.02,
+        // 主峰行必须在虹膜上方。`argmax` 给的是**扁平下标**，除一次 width 得到的是
+        // 像素行（不是 0…1 的占比）；写成 Int / Int 还会被截断。
+        // 两边统一用像素行比较，比镜像算出的眉带主峰在 row 36、虹膜在 row 43。
+        let irisY = Double(geometry.irisCenters[0].y) * Double(size.height)
+        let browRow = Double(browPeak) / Double(size.width)
+        XCTAssertLessThan(browRow, irisY - 2.0,
                           "眉带跑到眼睛下方 = 眉毛索引表错了")
 
         let base = solid(size, skin.r, skin.g, skin.b)
