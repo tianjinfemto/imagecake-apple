@@ -542,34 +542,16 @@ struct ImageDocument: Sendable {
                 }
             }
         }
-        // 垂直 pass 走行主序，理由与 `BeautyEngine.boxBlur1` 里那段完全一样（那边
-        // 写了实测数字）：每个像素经历的加、减序列与原来的列主序版本逐个相同，
-        // 所以结果逐比特不变 —— 这个函数被 region / skin / garment / 身体细纹
-        // 那一族共用，它们的输出既有逐比特断言守着。
-        var colSums = [Float](repeating: 0, count: w * 4)
         for x in 0 ..< w {
-            let key = x * 4
             for c in 0 ..< 4 {
                 var sum: Float = 0
                 for y in -radius ... radius {
                     sum += tmp[(min(max(y, 0), h - 1) * w + x) * 4 + c]
                 }
-                colSums[key + c] = sum
-            }
-        }
-        for y in 0 ..< h {
-            let row = (y * w) * 4
-            let subRow = (min(max(y - radius, 0), h - 1) * w) * 4
-            let addRow = (min(max(y + radius + 1, 0), h - 1) * w) * 4
-            for x in 0 ..< w {
-                let base = row + x * 4
-                let sub = subRow + x * 4
-                let add = addRow + x * 4
-                let key = x * 4
-                for c in 0 ..< 4 {
-                    out[base + c] = colSums[key + c] / window
-                    colSums[key + c] -= tmp[sub + c]
-                    colSums[key + c] += tmp[add + c]
+                for y in 0 ..< h {
+                    out[(y * w + x) * 4 + c] = sum / window
+                    sum -= tmp[(min(max(y - radius, 0), h - 1) * w + x) * 4 + c]
+                    sum += tmp[(min(max(y + radius + 1, 0), h - 1) * w + x) * 4 + c]
                 }
             }
         }
