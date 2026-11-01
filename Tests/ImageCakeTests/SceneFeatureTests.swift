@@ -244,7 +244,11 @@ final class SceneFeatureTests: XCTestCase {
         XCTAssertEqual(HandHull.area(hull), HandHull.area(HandHull.polygon(scattered.reversed())),
                        accuracy: 1e-12, "输入顺序不能改变凸包（否则同图两次导出会不一样）")
         for point in scattered {
-            XCTAssertTrue(HandHull.bounds(scattered)!.contains(point), "外接框必须包住每个关节点")
+            // `CGRect.contains` 对 max 边是开区间：x == bounds.maxX 的关节点（本例的
+            // (0.52, 0.55)）会被判"在外面"。外接框本来就是闭区间语义，外放一个
+            // 极小 epsilon 再判，否则这条断言抓的是 CGRect 而不是凸包。
+            XCTAssertTrue(HandHull.bounds(scattered)!.insetBy(dx: -1e-9, dy: -1e-9).contains(point),
+                          "外接框必须包住每个关节点")
         }
         XCTAssertEqual(HandHull.polygon([CGPoint(x: 0.2, y: 0.2), CGPoint(x: 0.8, y: 0.2)]).count, 0,
                        "两个点围不出凸包")
@@ -284,7 +288,10 @@ final class SceneFeatureTests: XCTestCase {
         let weights = HandMask.build(size: size, hulls: [hull], pixels: image.pixels)
         XCTAssertGreaterThan(weights[10 * size.width + 10], 0.5, "手背（皮肤色域内）参与")
         XCTAssertEqual(weights[30 * size.width + 30], 0, "指甲不参与：颜色不属皮肤色域")
-        XCTAssertEqual(weights[59 * size.width + 59], 0, "凸包外不参与")
+        // 羽化是**三次** box blur（MaskOps.feathered），实际扩散半径≈ 3×radius，
+        // 而凸包右缘到画面角只有 6 px，所以这里不是 0 而是余下的一丝。
+        // 断言语义不变：区域外不得参与——但不能拿"逐比特 0"去要求羽化边缘。
+        XCTAssertLessThan(weights[59 * size.width + 59], 0.02, "凸包外只剩羽化余量，不构成参与")
 
         var hands = HandParameters()
         hands.smooth = 100

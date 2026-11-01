@@ -124,7 +124,9 @@ public struct SkyParameters: Equatable, Sendable {
 
     public init() {}
 
-    public var isNeutral: Bool { !enabled || strength == 0 }
+    /// 光照匹配是独立效果： strength = 0 是“**只借光不借天**”这个常见用法，
+    /// 不能因为强度为 0 就把整组当成关（症状：拉 lightMatch 完全没反应）。
+    public var isNeutral: Bool { !enabled || (strength == 0 && lightMatch == 0) }
 
     public mutating func clamp() {
         strength = strength.clamped(to: 0 ... 100)

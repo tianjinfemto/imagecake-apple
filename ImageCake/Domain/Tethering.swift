@@ -54,7 +54,11 @@ struct TetherSettings: Equatable, Sendable {
     static let validIntervals: ClosedRange<Double> = 0 ... 10
     static let validBurst: ClosedRange<Double> = 1 ... 60
 
-    var burst: Int { Int(burstCount.rounded()).clamped(to: Int(Self.validBurst.lowerBound) ... Int(Self.validBurst.upperBound)) }
+    /// 用户**原本请求**的张数（不夹范围）。截断与夹回都要能点名，而 `burst`
+    /// 已经夹到 1…60 —— 拿它去比上限永远“没超额”，那就是“静默少拍”。
+    var requestedBurst: Int { Int(burstCount.rounded()) }
+
+    var burst: Int { requestedBurst.clamped(to: Int(Self.validBurst.lowerBound) ... Int(Self.validBurst.upperBound)) }
     var interval: Double { intervalSeconds.clamped(to: Self.validIntervals) }
 }
 
@@ -75,32 +79,41 @@ enum TetherPlan {
         return (ranked(usable)[0], preferred != nil)
     }
 
-    /// 稳定排序：外接优先（联机拍摄的人本来就是拿外接相机），
-    /// 同级按 id 排保证两次结果一致（不稳定的排序会让"默认设备"每次不同）。
+    /// 稳定排序：可用的排前面，同层里外接优先（联机拍摄的人本来就是拿外接相机），
+    /// 再同层按 id 排保证两次结果一致（不稳定的排序会让"默认设备"每次不同）。
+    ///
+    /// 可用性必须参与排序：一台**没插电的外接相机**如果排在能用的内置机位之前，
+    /// 列表就把用户引到一个按了也没反应的行上。
     static func ranked(_ devices: [TetheredDevice]) -> [TetheredDevice] {
         devices.enumerated().sorted { lhs, rhs in
-            let score = rankScore(lhs.element.kind) - rankScore(rhs.element.kind)
+            let score = rankScore(lhs.element) - rankScore(rhs.element)
             if score != 0 { return score < 0 }
             return lhs.element.id < rhs.element.id
         }.map(\.element)
     }
 
-    private static func rankScore(_ kind: String) -> Int {
-        switch kind {
-        case "external": return 0
-        case "continuity": return 1
-        default: return 2
+    private static func rankScore(_ device: TetheredDevice) -> Int {
+        let kind: Int
+        switch device.kind {
+        case "external": kind = 0
+        case "continuity": kind = 1
+        default: kind = 2
         }
+        return kind + (device.isUsable ? 0 : 10)
     }
 
     /// 连拍队列（含每张的等待时长）。`burst` 越界会被夹到上限，
     /// 并在 `notes` 里说明——不静默丢张。
     static func queue(settings: TetherSettings) -> (shots: [TetherShot], notes: [String]) {
         var notes: [String] = []
-        let requested = settings.burst
-        let accepted = min(requested, queueLimit)
+        // 拿**未夹范围**的请求值来比上限，否则 `burst` 自己已经夹到 60，
+        // `accepted < requested` 永假 —— 请求 999 张会变成“默声拍 60 张”。
+        let requested = settings.requestedBurst
+        let accepted = max(1, min(requested, queueLimit))
         if accepted < requested {
             notes.append("[burst_capped] 连拍上限 \(queueLimit) 张（请求 \(requested) 张）：长队列在 iPad 上会被后台挂起中断")
+        } else if requested < 1 {
+            notes.append("[burst_clamped] 请求 \(requested) 张不是合法值，按单拍处理")
         }
         let interval = settings.interval
         let shots = (0 ..< accepted).map { index in
