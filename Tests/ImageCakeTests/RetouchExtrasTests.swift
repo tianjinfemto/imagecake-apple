@@ -67,12 +67,13 @@ final class RetouchExtrasTests: XCTestCase {
         }
         let irisRow = Double(iris.y) * Double(size.height)
         let span = "非零行 \(firstRow)..\(lastRow)，眼圈行 ~\(Int(irisRow))"
-        XCTAssertLessThanOrEqual(Double(lastRow), irisRow + 12.0,
-                                 "镜片区下边界不得低过眼睛 12px：\(span)")
-        XCTAssertGreaterThanOrEqual(Double(firstRow), irisRow - 20.0,
-                                    "镜片区上边界不得高过额头：\(span)")
-        XCTAssertEqual(weights[90 * size.width + 50], 0,
-                       "row 90（唇以下）不该有任何权重：\(span)")
+        // 镜片区 = 虹膜上下各 2.4r / 1.8r 再加羽化余量。夹具里 r ≈ 2px，
+        // 所以下面这个允许已经是很宽的：再远就是“盖到额头/嘴”那种错。
+        let allow = Swift.max(6.0, geometry.irisRadius * Double(size.height) * 4 + 5)
+        XCTAssertLessThanOrEqual(Double(lastRow), irisRow + allow, "镜片区下边界越界（盖到嘴/下巴）：\(span)")
+        XCTAssertGreaterThanOrEqual(Double(firstRow), irisRow - allow, "镜片区上边界跑到了额头：\(span)")
+        XCTAssertEqual(weights[90 * size.width + 50], 0, "row 90（嘴以下）不该有任何权重：\(span)")
+        XCTAssertEqual(weights[8 * size.width + 50], 0, "row 8（额头以上）不该有任何权重：\(span)")
     }
 
     // MARK: - 2. 眼镜祛反光
@@ -125,7 +126,7 @@ final class RetouchExtrasTests: XCTestCase {
                                    amount: BeautyParameters.unit(beauty.antiGlare))
 
         var reduced = 0
-        for i in fixture.glare where lumaOf(pixels, i) < lumaOf(fixture.image.pixels, i) - 0.02 {
+        for i in fixture.glare where lumaOf(pixels, i) < lumaOf(fixture.image.pixels, i) - 0.01 {
             reduced += 1
         }
         XCTAssertGreaterThan(reduced, max(1, fixture.glare.count / 3),

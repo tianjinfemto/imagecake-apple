@@ -262,24 +262,36 @@ enum RegionEnhance {
         }
     }
 
-    /// 镜片区域：每个眼圈的外接框向四周放大。
+    /// 镜片区域：以**虹膜**为锚、按虹膜半径外推的矩形（横向 ±3.2r，上 2.4r、下 1.8r）。
     ///
-    /// 为什么用矩形而不是跟着眼睛形状：镜片比眼睛大一圈，而且它的形状由镜架
-    /// 决定——图里根本没有镜架信息（那要分割权重）。所以宁可把区域给大：
-    /// 真正的护栏是算子内部的"比邻域亮出来、且低饱和"两道门，不是掩码边界。
-    /// 上下不对称：镜圈往上放多于往下（眉以下到脸颊之间是额头与皮肤，不是镜片）。
+    /// 为什么不用眼圈外接框外推：上一版那么写，CI 直接报镜片区一路盖到了
+    /// 下巴（非零行 15..74，而眼圈中点在 43 行）。原因是眼环里含下睑点，
+    /// eh 可以比眼睛本身高一大截，而 `±1.0·eh / 0.6·eh` 是拿它当尺子的 ——
+    /// 环一旦偏高，框就撑到额头和嘴。虹膜半径是这堆量里最稳定的一个
+    /// （与 `eyeWeights` 同一口径），所以拿它当尺子。
+    /// 上下不对称：镜圈上半要盖住镜框上沿，下半只需盖到下睑。
+    /// 区域给大一点没关系：真正的护栏是算子内部的"比邻域亮出来、且低饱和"
+    /// 两道门，不是掩码边界；镜架形状需要分割权重，图里没有。
     static func lensWeights(_ geometry: FaceGeometry, size: PixelSize) -> [Float] {
+        guard size.pixelCount > 0, geometry.irisRadius > 0 else {
+            return [Float](repeating: 0, count: size.pixelCount)
+        }
         var out = [UInt8](repeating: 0, count: size.pixelCount)
-        for ring in geometry.eyeRings where ring.count >= 3 {
-            let xs = ring.map { Double($0.x) }, ys = ring.map { Double($0.y) }
-            guard let minX = xs.min(), let maxX = xs.max(),
-                  let minY = ys.min(), let maxY = ys.max() else { continue }
-            let ew = maxX - minX, eh = maxY - minY
-            guard ew > 0.001, eh > 0.001 else { continue }
-            let x0 = Swift.max(0.0, minX - ew * 0.7), x1 = Swift.min(1.0, maxX + ew * 0.7)
-            let y0 = Swift.max(0.0, minY - eh * 1.0), y1 = Swift.min(1.0, maxY + eh * 0.6)
-            let rect = [CGPoint(x: x0, y: y0), CGPoint(x: x1, y: y0),
-                        CGPoint(x: x1, y: y1), CGPoint(x: x0, y: y1)]
+        let rx = geometry.irisRadius * Double(size.width)
+        let ry = geometry.irisRadius * Double(size.height)
+        guard rx > 0, ry > 0 else { return [Float](repeating: 0, count: size.pixelCount) }
+        for center in geometry.irisCenters {
+            let cx = Double(center.x) * Double(size.width)
+            let cy = Double(center.y) * Double(size.height)
+            let x0 = Swift.max(0, cx - rx * 3.2)
+            let x1 = Swift.min(Double(size.width - 1), cx + rx * 3.2)
+            let y0 = Swift.max(0, cy - ry * 2.4)
+            let y1 = Swift.min(Double(size.height - 1), cy + ry * 1.8)
+            guard x1 > x0, y1 > y0 else { continue }
+            let rect = [CGPoint(x: x0 / Double(size.width), y: y0 / Double(size.height)),
+                        CGPoint(x: x1 / Double(size.width), y: y0 / Double(size.height)),
+                        CGPoint(x: x1 / Double(size.width), y: y1 / Double(size.height)),
+                        CGPoint(x: x0 / Double(size.width), y: y1 / Double(size.height))]
             union(into: &out, disk: RegionRaster.polygon(rect, size: size,
                                                          feather: Swift.max(1, size.longEdge / 240)))
         }
