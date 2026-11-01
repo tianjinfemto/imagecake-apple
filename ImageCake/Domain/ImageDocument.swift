@@ -236,22 +236,30 @@ struct ImageDocument: Sendable {
     }
 
     /// 预览/导出共用的一次渲染。返回显示码图（8bit 编码前）。
-    func render(applyMask: Bool = true) -> DisplayImage {
+    ///
+    /// `perf` 默认是关着的共享实例：不关心耗时的调用点（面板、导出、测试）不用多写
+    /// 一个参数，而阶段名与毫秒数只累加到传进来的那个已启用实例上。
+    /// **不变量**：被中性闸门跳过的阶段根本不出现在样本列表里 ——
+    /// “改一个滑杆只重算受影响阶段”就是靠这条能被断言的事实兑现的。
+    func render(applyMask: Bool = true, perf: RenderPerf = RenderPerf.disabled) -> DisplayImage {
         // -1. 几何转正（旋转/翻转/裁剪）。最先做：它改画布尺寸，后面所有
         //     归一化坐标指的都是用户看到的这一帧。恒等时整段跳过（不插值、
         //     不重采样，中性图逐比特不变）。
-        var workingLinear = GeometryEngine.apply(geometry, to: linear)
+        var workingLinear = perf.stage("geometry") { GeometryEngine.apply(geometry, to: linear) }
 
         // 0. 老照片修复：褪色恢复 + 划痕去除。在调色之前——它改的是输入
         //    本身的化学褪变，不是创意调色。先修后调，调色才不会把褪色
         //    当成"有意为之"再去抵消。
         if oldPhotoRestore {
-            let display = ToneEngine.render(workingLinear, params: EditParameters())
-            let restored = OldPhotoEngine.restore(display, scratchThreshold: oldPhotoScratchThreshold)
-            workingLinear = LinearImage(display: restored.0) ?? workingLinear
+            let restoredLinear = perf.stage("oldPhoto") { () -> LinearImage in
+                let flat = ToneEngine.render(workingLinear, params: EditParameters())
+                let restored = OldPhotoEngine.restore(flat, scratchThreshold: oldPhotoScratchThreshold)
+                return LinearImage(display: restored.0) ?? workingLinear
+            }
+            workingLinear = restoredLinear
         }
 
-        var display = ToneEngine.render(workingLinear, params: params)
+        var display = perf.stage("tone") { ToneEngine.render(workingLinear, params: params) }
 
         // 追色：在全局调色之后、皮肤掩码与本地调节之前。位置是有理由的：
         //   · 放在 ToneEngine 之后——追的是“已经按本张图调过一遍”的结果，
@@ -263,13 +271,15 @@ struct ImageDocument: Sendable {
         //   · 参考图缺失时 `ColorTransfer.apply` 原样返回，缺件由
         //     `pipelineWarnings` 点名，不拿“没变”当“做完了”。
         if !params.colorMatch.isNeutral {
-            display = ColorTransfer.apply(display, reference: colorReference, match: params.colorMatch)
+            display = perf.stage("colorMatch") { ColorTransfer.apply(display, reference: colorReference, match: params.colorMatch) }
         }
 
         // 本地调节：在全局调色之后、空间滤波之前。选区内再叠一层调色，
         // 选区外不动。复用笔迹底座做掩码，与保护笔刷同构。
         if !localAdjustments.isEmpty {
-            display = LocalAdjustmentEngine.apply(display, adjustments: localAdjustments, linear: workingLinear)
+            display = perf.stage("localAdjust") {
+                LocalAdjustmentEngine.apply(display, adjustments: localAdjustments, linear: workingLinear)
+            }
         }
 
         // 皮肤掩码：在滤镜之前判。风格会把整个色相分布推走，皮肤椭圆
@@ -277,19 +287,21 @@ struct ImageDocument: Sendable {
         // 导出报告共用），所以它不是“顺便算算”，而是被开关闸住的必经步。
         let skinLayers: SkinMask.Layers?
         if params.beauty.isSkinNeutral {
-            skinLayers = nil
+            skinLayers = nil                                  // 不进计时列表：根本没跑
         } else {
-            skinLayers = SkinMask.build(display, personMask: personMask, faceBoxes: faceBoxes)
+            skinLayers = perf.stage("skinMask") {
+                SkinMask.build(display, personMask: personMask, faceBoxes: faceBoxes)
+            }
         }
 
         // 滤镜/LUT：逐点映射，在任何读邻域的算子之前做（它只改颜色不改结构）。
         if !params.filter.isNeutral, let lut = FilterEngine.resolve(name: params.filter.style) {
-            display = FilterEngine.apply(display, lut: lut, strength: params.filter.strength)
+            display = perf.stage("filter") { FilterEngine.apply(display, lut: lut, strength: params.filter.strength) }
         }
 
         // 镜头几何：畸变与色差。在笔刷之前——它们改像素位置。
         if !params.lens.isGeometryNeutral {
-            display = LensEngine.applyGeometry(display, lens: params.lens)
+            display = perf.stage("lensGeometry") { LensEngine.applyGeometry(display, lens: params.lens) }
         }
 
         // 空间滤波：先降噪再锐化（反过来等于先把噪声锐化一遍）。
@@ -298,59 +310,69 @@ struct ImageDocument: Sendable {
         // 背景替换更靠后，因为它是逐像素 α 合成，不是空间操作。
         if !params.isSpatialNeutral {
             if params.denoise > 0 {
-                display = SpatialFilters.denoise(display, strength: params.denoise)
+                display = perf.stage("denoise") { SpatialFilters.denoise(display, strength: params.denoise) }
             }
             if params.sharpen > 0 {
-                display = SpatialFilters.sharpen(display, strength: params.sharpen)
+                display = perf.stage("sharpen") { SpatialFilters.sharpen(display, strength: params.sharpen) }
             }
         }
 
         // 皮肤精修。在降噪之后：磨皮自己就是保边平滑，先把传感器噪声降噪
         // 一遍再磨，比拿噪声去调“纹理保留量”稳定得多。
         if let skinLayers {
-            display = BeautyEngine.apply(display, skin: skinLayers, beauty: params.beauty)
+            display = perf.stage("skin") { BeautyEngine.apply(display, skin: skinLayers, beauty: params.beauty) }
         }
 
         // 五官区域美化（亮眼/牙齿/唇色/腮红/祛黑眼圈/法令纹）：逐张脸都做，
         // 一张关键点都给不出就整段跳过。
         if !params.beauty.isRegionNeutral {
-            display = RegionEnhance.apply(display, geometries: faceGeometries, beauty: params.beauty,
-                                          faceStrength: params.faceStrength)
+            display = perf.stage("region") {
+                RegionEnhance.apply(display, geometries: faceGeometries, beauty: params.beauty,
+                                    faceStrength: params.faceStrength)
+            }
         }
 
         // 妆容模板：跟区域美化同一层、同一依赖（关键点），所以紧跟其后。
         // 它在祛黑眼圈/法令纹之后：妆是"往上叠东西"，专项瑕疵是"去掉不该有的差"，
         // 顺序反了会把刚填平的瑕疵又盖一层颜色。
         if !params.makeup.isNeutral {
-            display = MakeupEngine.apply(display, geometries: faceGeometries, makeup: params.makeup)
+            display = perf.stage("makeup") {
+                MakeupEngine.apply(display, geometries: faceGeometries, makeup: params.makeup)
+            }
         }
 
         // 手部与头发：都是"靠另一个区域定位的人像修改"，排在美型形变之前——
         // 形变会搬运像素，先推脸再磨手会让两者用的区域不是同一块画面。
         if !params.hand.isNeutral, !handHulls.isEmpty {
             let weights = HandMask.build(size: display.size, hulls: handHulls, pixels: display.pixels)
-            display = HandEngine.apply(display, weights: weights, hands: params.hand)
+            display = perf.stage("hand") { HandEngine.apply(display, weights: weights, hands: params.hand) }
         }
         if !params.hair.isNeutral, let bounds = faceGeometry?.bounds {
             let weights = HairMask.build(display, faceBounds: bounds, personMask: personMask)
-            display = HairEngine.apply(display, weights: weights, hair: params.hair)
+            display = perf.stage("hair") { HairEngine.apply(display, weights: weights, hair: params.hair) }
         }
 
         // 形变类：美型预设 → 手动液化 → 仿制图章。
         // 预设排在手动之前：手动笔迹是用户“对着当前画面推”的结果，
         // 它必须是最后一位挪像素的人；保护掩码三者共用，只栅格化一次。
         if !params.beauty.isShapeNeutral || !brush.liquify.isEmpty || !brush.stamps.isEmpty {
-            let protectionMask = brush.protectionMask(for: display.size)
+            let protectionMask = perf.stage("protectionMask") { brush.protectionMask(for: display.size) }
             if !params.beauty.isShapeNeutral {
-                display = ShapeWarp.apply(display, faces: faceGeometries, body: bodyAnchors,
-                                          beauty: params.beauty, protection: protectionMask,
-                                          faceStrength: params.faceStrength)
+                display = perf.stage("shape") {
+                    ShapeWarp.apply(display, faces: faceGeometries, body: bodyAnchors,
+                                    beauty: params.beauty, protection: protectionMask,
+                                    faceStrength: params.faceStrength)
+                }
             }
             if !brush.liquify.isEmpty {
-                display = LiquifyEngine.apply(display, strokes: brush.liquify, protection: protectionMask)
+                display = perf.stage("liquify") {
+                    LiquifyEngine.apply(display, strokes: brush.liquify, protection: protectionMask)
+                }
             }
             if !brush.stamps.isEmpty {
-                display = CloneStampEngine.apply(display, stamps: brush.stamps, protection: protectionMask)
+                display = perf.stage("stamps") {
+                    CloneStampEngine.apply(display, stamps: brush.stamps, protection: protectionMask)
+                }
             }
         }
 
@@ -358,44 +380,49 @@ struct ImageDocument: Sendable {
         // 涂一块"的历史操作，所以必须待在同一族里——放在修复补丁之后会让
         // 用户刚熨平的地方又被补丁贴回褶纹。
         if !params.garment.isNeutral, let garmentMask = brush.garmentMask(for: display.size) {
-            display = GarmentEngine.apply(display, weights: SkinMask.weights(garmentMask, size: display.size),
-                                          garment: params.garment)
+            display = perf.stage("garment") {
+                GarmentEngine.apply(display, weights: SkinMask.weights(garmentMask, size: display.size),
+                                    garment: params.garment)
+            }
         }
 
         // 身体细纹（颈纹/妊娠纹）：紧跟衣物那一类。两者同为"涂一块 + 只动那一块
         // 的某种结构"，而且都用当前画面做低频参考，所以必须在任何会搬运像素的
         // 算子（液化/图章）之后，不然涂的块和实际被改的位置不是同一处。
         if !params.bodyLine.isNeutral, let lineMask = brush.lineMask(for: display.size) {
-            display = LineEngine.apply(display, weights: SkinMask.weights(lineMask, size: display.size),
-                                       lines: params.bodyLine)
+            display = perf.stage("bodyLine") {
+                LineEngine.apply(display, weights: SkinMask.weights(lineMask, size: display.size),
+                                 lines: params.bodyLine)
+            }
         }
 
         // 修补笔迹（同图取样）：在图章之后、补丁之前。图章和修补都是
         // 从当前画面取样，但修补是固定偏移量，图章是动态锚点。
         if !patchStrokes.isEmpty {
-            display = PatchEngine.apply(display, strokes: patchStrokes)
+            display = perf.stage("patch") { PatchEngine.apply(display, strokes: patchStrokes) }
         }
 
         // 修复补丁：只在尺寸对得上时按相对量贴回去。
         if !patches.isEmpty {
-            var bytes = display.rgba8()
-            for patch in patches {
-                let scaled: InpaintPatch?
-                if patch.reference == canvasSize {
-                    scaled = patch
-                } else {
-                    scaled = patch.scaled(to: canvasSize)
+            let patched = perf.stage("inpaint") { () -> DisplayImage in
+                var bytes = display.rgba8()
+                for patch in patches {
+                    let scaled: InpaintPatch?
+                    if patch.reference == canvasSize {
+                        scaled = patch
+                    } else {
+                        scaled = patch.scaled(to: canvasSize)
+                    }
+                    guard let scaled else { continue }
+                    bytes = InpaintTask.compose(bottom: bytes, patch: scaled)
                 }
-                guard let scaled else { continue }
-                bytes = InpaintTask.compose(bottom: bytes, patch: scaled)
+                return DisplayImage(displayRGBA8: bytes) ?? display
             }
-            if let rebuilt = DisplayImage(displayRGBA8: bytes) {
-                display = rebuilt
-            }
+            display = patched
         }
 
         if applyMask, params.bgEnabled, let mask = personMask {
-            display = Self.replaceBackground(display: display, mask: mask, params: params)
+            display = perf.stage("background") { Self.replaceBackground(display: display, mask: mask, params: params) }
         }
 
         // 换天空：在换底色之后（两者都在背景层动手，但天空的掩码更局部）。
@@ -403,7 +430,9 @@ struct ImageDocument: Sendable {
         if !params.sky.isNeutral, let skyMask = skyMask {
             let weights = SkinMask.weights(skyMask.resized(to: display.size), size: display.size)
             if params.sky.mode == .gradient || display.size == skyPhoto?.size {
-                display = SkyEngine.apply(display, weights: weights, sky: params.sky, photo: skyPhoto)
+                display = perf.stage("sky") {
+                    SkyEngine.apply(display, weights: weights, sky: params.sky, photo: skyPhoto)
+                }
             }
         }
 
@@ -411,12 +440,12 @@ struct ImageDocument: Sendable {
         // 再加（否则磨皮会把刚加的方向对比又抹平），而它必须在暗角之前——
         // 暗角是"四角变暗"，跟在新光后面会把刚建立的方向关系抹平。
         if !params.light.isNeutral {
-            display = RelightEngine.apply(display, light: params.light)
+            display = perf.stage("relight") { RelightEngine.apply(display, light: params.light) }
         }
 
         // 暗角与颗粒：输出层，最后一道。
         if !params.lens.isOverlayNeutral {
-            display = LensEngine.applyOverlay(display, lens: params.lens)
+            display = perf.stage("overlay") { LensEngine.applyOverlay(display, lens: params.lens) }
         }
         return display
     }

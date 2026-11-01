@@ -187,6 +187,16 @@ struct EditorView: View {
                     .foregroundStyle(Tokens.danger)
                     .lineLimit(1)
             }
+            // 耗时行默认不显示，但要随手可开（工具栏“渲染耗时”）：性能优化
+            // 得能在真机上当场看到“耗在哪一段”，而不是只能回来看日志。
+            if model.showRenderPerf && !model.renderPerfSummary.isEmpty {
+                Text(model.renderPerfSummary)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(Tokens.textSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .macHelp("各阶段之和；不含阶段之间的调度空隙")
+            }
             if model.document?.isRAW == true {
                 TokenBadge(text: "RAW")
             }

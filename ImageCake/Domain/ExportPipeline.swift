@@ -117,39 +117,51 @@ enum ExportPipeline {
         // 不两处各写一套判定。
         notes.append(contentsOf: working.pipelineWarnings)
 
-        var display = working.render()
+        // 导出自己开一个计时器：它与预览同一口径、但不共用实例（一个实例只属于
+        // 一次渲染），这样全分辨率重放到底耗在哪一段会直接写进导出报告。
+        let perf = RenderPerf()
+        var display = working.render(perf: perf)
         var bytes = display.rgba8()
 
         if working.params.faceRestore > 0 {
-            let result = await FaceRestoreTask.run(display: bytes,
-                                                   strength: Int(working.params.faceRestore),
-                                                   store: store,
-                                                   ort: ort)
-            if let image = result.image {
-                bytes = image
-                if !result.report.note.isEmpty { notes.append(result.report.note) }
-            } else {
-                notes.append(result.report.note)
+            let result = try? await perf.stageAsync("faceRestore") {
+                await FaceRestoreTask.run(display: bytes,
+                                          strength: Int(working.params.faceRestore),
+                                          store: store,
+                                          ort: ort)
+            }
+            if let result {
+                if let image = result.image {
+                    bytes = image
+                    if !result.report.note.isEmpty { notes.append(result.report.note) }
+                } else {
+                    notes.append(result.report.note)
+                }
             }
         }
 
         if working.params.superRes != 0 {
-            let result = await SuperResTask.run(display: bytes,
-                                                scale: working.params.superRes,
-                                                store: store,
-                                                ort: ort)
-            if let image = result.image {
-                bytes = image
-                if !result.report.note.isEmpty { notes.append(result.report.note) }
-            } else {
-                notes.append(result.report.note)
+            let result = try? await perf.stageAsync("superRes") {
+                await SuperResTask.run(display: bytes,
+                                       scale: working.params.superRes,
+                                       store: store,
+                                       ort: ort)
+            }
+            if let result {
+                if let image = result.image {
+                    bytes = image
+                    if !result.report.note.isEmpty { notes.append(result.report.note) }
+                } else {
+                    notes.append(result.report.note)
+                }
             }
         }
 
         // 证件照排版：把单张照片排到相纸上（同一张重复 N 次）。
         // 排在 AI 之后：重绘/超清要对着单张大图做，排完再跑等于浪费算力。
         if let sheet = working.idPhotoSheet {
-            if let laid = IDPhoto.layout(bytes, sheet: sheet) {
+            let laid = perf.stage("idPhoto") { IDPhoto.layout(bytes, sheet: sheet) }
+            if let laid {
                 bytes = laid
                 notes.append("[id_photo] \(sheet.paper.title) 排 \(sheet.count) 张 · \(sheet.canvas.width)×\(sheet.canvas.height)")
             } else {
@@ -165,9 +177,11 @@ enum ExportPipeline {
         // 但**强制关掉交付端 AI**：4 格就是 4 次重绘/超清，批量场景是分钟级
         // 叠加，而且逐格重绘在拼图上看不出区别。
         if let composition = working.collage {
-            let stage = await Self.composeCollage(main: bytes, canvas: display.size,
-                                                  composition: composition, document: working,
-                                                  store: store, ort: ort)
+            let stage = await perf.stageAsync("collage") {
+                await Self.composeCollage(main: bytes, canvas: display.size,
+                                          composition: composition, document: working,
+                                          store: store, ort: ort)
+            }
             switch stage {
             case .composed(let laid, let note):
                 bytes = laid
@@ -179,13 +193,17 @@ enum ExportPipeline {
 
         // 水印/边框/文字贴纸：导出最后一步（AI 之后、编码之前）。
         // 不进预览管线——预览看修图效果，不看装饰。
+
         if !working.overlays.isEmpty {
-            bytes = OverlayEngine.apply(bytes, elements: working.overlays)
+            bytes = perf.stage("overlays") { OverlayEngine.apply(bytes, elements: working.overlays) }
         }
 
         if let rebuilt = DisplayImage(displayRGBA8: bytes) {
             display = rebuilt
         }
+        // 导出报告里的耗时行：与预览同一口径、同一个类型，只是多带几个 AI 阶段。
+        // 它不靠肉眼验收：没有这一行，“导出特别慢”永远只能凭感觉说。
+        notes.append("[perf] " + perf.summary())
         return ExportOutcome(display: display, notes: notes)
     }
 

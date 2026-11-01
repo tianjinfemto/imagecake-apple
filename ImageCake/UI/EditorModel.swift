@@ -74,6 +74,12 @@ final class EditorModel: ObservableObject {
     @Published private(set) var preview: CGImage?
     @Published private(set) var maskOverlay: CGImage?
     @Published private(set) var clippingOverlay: CGImage?
+    /// 上一次预览渲染的阶段耗时一行（底栏开关打开时显示）。
+    /// 它就是 P1 性能工作的"可测指标"本身：没改一行优化代码之前，
+    /// 得先能回答"40MP 上拖一个滑杆到底耗在哪一段"。
+    @Published private(set) var renderPerfSummary: String = ""
+    /// 底栏是否显示耗时（默认关：它不是用户天天要看的东西，但必须随手可开）。
+    @Published var showRenderPerf = false
     /// 当前预览的直方图与溢出统计（调色面板的直方图卡片读这里）。
     @Published private(set) var histogram: Histogram = .empty
     @Published private(set) var busy: Busy?
@@ -740,6 +746,7 @@ final class EditorModel: ObservableObject {
             self?.maskOverlay = result.mask
             self?.clippingOverlay = result.clipping
             self?.histogram = result.histogram
+            self?.renderPerfSummary = result.perf.summary()
         }
     }
 
@@ -754,6 +761,7 @@ final class EditorModel: ObservableObject {
         maskOverlay = result.mask
         clippingOverlay = result.clipping
         histogram = result.histogram
+        renderPerfSummary = result.perf.summary()
     }
 
     // MARK: - AI：抠图
@@ -1669,19 +1677,28 @@ struct PreviewRender: Sendable {
     var mask: CGImage?
     var clipping: CGImage?
     var histogram: Histogram
+    /// 本次渲染的阶段耗时。跟着结果一起回主线程，是为了让"用户等到画的那段时间"
+    /// 与计时范围完全同一口径：直方图与两个叠层也在同一个采集窗口里，
+    /// 只量 `render()` 会系统性低估实际延迟。
+    var perf: RenderPerf
 
-    static func produce(_ snapshot: ImageDocument, showMask: Bool, showClipping: Bool) -> PreviewRender {
-        let display = snapshot.render()
-        let histogram = HistogramBuilder.build(
-            display, stride: HistogramBuilder.suggestedStride(pixelCount: display.size.pixelCount))
+    static func produce(_ snapshot: ImageDocument, showMask: Bool, showClipping: Bool,
+                        perf: RenderPerf = RenderPerf()) -> PreviewRender {
+        let display = snapshot.render(perf: perf)
+        let histogram = perf.stage("histogram") {
+            HistogramBuilder.build(display,
+                                   stride: HistogramBuilder.suggestedStride(pixelCount: display.size.pixelCount))
+        }
         var overlay: CGImage? = nil
         if showMask, let mask = snapshot.personMask {
-            overlay = mask.resized(to: snapshot.canvasSize).cgImage()
+            overlay = perf.stage("maskOverlay") { mask.resized(to: snapshot.canvasSize).cgImage() }
         }
         var clipping: CGImage? = nil
         if showClipping {
-            clipping = ClippingOverlay.mask(display).cgImage()
+            clipping = perf.stage("clippingOverlay") { ClippingOverlay.mask(display).cgImage() }
         }
-        return PreviewRender(image: display.cgImage(), mask: overlay, clipping: clipping, histogram: histogram)
+        let image = perf.stage("toCGImage") { display.cgImage() }
+        return PreviewRender(image: image, mask: overlay, clipping: clipping,
+                             histogram: histogram, perf: perf)
     }
 }
