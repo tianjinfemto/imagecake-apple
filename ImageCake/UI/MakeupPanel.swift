@@ -13,6 +13,25 @@ import SwiftUI
 struct MakeupPanel: View {
     @EnvironmentObject private var model: EditorModel
 
+    @State private var hairColorID = "brown"
+
+    /// 六个发色预设。不给开放拾色器的理由与换天空那两个色一样：发色必须
+    /// 落在“真头发能有的颜色”里才不像假发，而自由取色一半概率取到荧光色。
+    /// 需要真自由色的时候，目标色就是 `hair.colorHex`，面板换预设时直接写它。
+    private struct HairTone: Identifiable, Equatable {
+        var id: String
+        var title: String
+        var hex: UInt32
+    }
+    private static let hairTones: [HairTone] = [
+        HairTone(id: "black", title: "黑", hex: 0x1A_17_15),
+        HairTone(id: "brown", title: "深棕", hex: 0x6B_4A_34),
+        HairTone(id: "linen", title: "亚麻", hex: 0xB8_92_63),
+        HairTone(id: "copper", title: "铜红", hex: 0x9E_4B_2A),
+        HairTone(id: "wine", title: "酒红", hex: 0x63_1F_30),
+        HairTone(id: "ash", title: "蓝黑", hex: 0x2C_33_42)
+    ]
+
     var body: some View {
         VStack(spacing: 12) {
             makeupSection
@@ -57,8 +76,31 @@ struct MakeupPanel: View {
             SliderRow(title: "光泽", range: -100 ... 100,
                       format: { $0 == 0 ? "原样" : ($0 > 0 ? "加光泽" : "压亮丝") },
                       value: double(\.hair.shine))
-            SliderRow(title: "发色", range: 0 ... 100, value: double(\.hair.tint))
-            Text("发区 = 不在皮肤色域 ∧ 在头部框内 ∧ 额头以上或脸侧带状区。软阈值只削小振幅的碎边，超过阈值的真实发丝原样保留。边界：发丝级蒙版要分割权重；齐肩短发与衣领交界仍会误判。")
+            SliderRow(title: "发色饱和", range: 0 ... 100, value: double(\.hair.tint))
+            SliderRow(title: "祛碎发", range: 0 ... 100, value: double(\.hair.tame))
+
+            Text("换个发色").font(.system(size: 10)).foregroundStyle(Tokens.textSecondary)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 52), spacing: 6)], spacing: 6) {
+                ForEach(Self.hairTones) { tone in
+                    Button {
+                        hairColorID = tone.id
+                        model.updateParams { $0.hair.colorHex = tone.hex }
+                    } label: {
+                        Text(tone.title)
+                            .font(.system(size: 10))
+                            .padding(.vertical, 4).frame(maxWidth: .infinity)
+                            .background(hairColorID == tone.id ? Tokens.accent.opacity(0.18)
+                                                                : Color.clear)
+                            .cornerRadius(6)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            SliderRow(title: "换发色", range: 0 ... 100,
+                      format: { $0 == 0 ? "不换" : String(Int($0.rounded())) },
+                      value: double(\.hair.colorStrength))
+
+            Text("发区 = 不在皮肤色域 ∧ 在头部框内 ∧ 额头以上或脸侧带状区。软阈值只削小振幅的碎边，超过阈值的真实发丝原样保留。换发色只推色度不动亮度（亮度一动就没体积了）；祛碎发只作用于发区边缘那一圈环带。边界：发丝级蒙版要分割权重；齐肩短发与衣领交界仍会误判。")
                 .font(.system(size: 10))
                 .foregroundStyle(Tokens.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)

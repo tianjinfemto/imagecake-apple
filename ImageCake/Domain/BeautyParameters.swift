@@ -53,6 +53,9 @@ public struct BeautyParameters: Equatable, Sendable {
     /// 0…100 祛法令纹。方向与磨皮相反：只填"比邻域暗得多的细线"，
     /// 颧骨的阴影（低频）一律不动——不然脸会扁一块。
     public var nasolabial: Double = 0
+    /// 0…100 眼镜祛反光。只压**镜片区里比邻域亮出来且低饱和**的那一段，
+    /// 不编造反光底下的颜色（那张图里没有这个信息），也不碰彩色镜片与瞳孔。
+    public var antiGlare: Double = 0
 
     // —— 五官形变（需要人脸关键点） ——
     public var slimFace: Double = 0      // 瘦颊：颊点向脸部中轴推
@@ -80,7 +83,7 @@ public struct BeautyParameters: Equatable, Sendable {
 
     public var isRegionNeutral: Bool {
         eyeBright == 0 && teethWhiten == 0 && lipColor == 0 && blush == 0
-            && darkCircle == 0 && nasolabial == 0
+            && darkCircle == 0 && nasolabial == 0 && antiGlare == 0
     }
 
     public var isFaceShapeNeutral: Bool {
@@ -117,6 +120,7 @@ public struct BeautyParameters: Equatable, Sendable {
         blush = blush.clamped(to: 0 ... 100)
         darkCircle = darkCircle.clamped(to: 0 ... 100)
         nasolabial = nasolabial.clamped(to: 0 ... 100)
+        antiGlare = antiGlare.clamped(to: 0 ... 100)
         slimFace = slimFace.clamped(to: -100 ... 100)
         enlargeEyes = enlargeEyes.clamped(to: -100 ... 100)
         noseSlim = noseSlim.clamped(to: -100 ... 100)
@@ -191,7 +195,7 @@ extension BeautyParameters: Codable {
         case skinSmooth = "skin_smooth", bodySmooth = "body_smooth", smoothMode = "smooth_mode"
         case blemish, toneUnify = "tone_unify", redness, deShine = "de_shine", whitening
         case eyeBright = "eye_bright", teethWhiten = "teeth_whiten", lipColor = "lip_color", blush
-        case darkCircle = "dark_circle", nasolabial
+        case darkCircle = "dark_circle", nasolabial, antiGlare = "anti_glare"
         case slimFace = "slim_face", enlargeEyes = "enlarge_eyes", noseSlim = "nose_slim"
         case jawSlim = "jaw_slim", smileLift = "smile_lift", chinAdjust = "chin_adjust"
         case waistSlim = "waist_slim", legsSlim = "legs_slim", heighten
@@ -215,6 +219,7 @@ extension BeautyParameters: Codable {
         blush = try c.decodeIfPresent(Double.self, forKey: .blush) ?? blush
         darkCircle = try c.decodeIfPresent(Double.self, forKey: .darkCircle) ?? darkCircle
         nasolabial = try c.decodeIfPresent(Double.self, forKey: .nasolabial) ?? nasolabial
+        antiGlare = try c.decodeIfPresent(Double.self, forKey: .antiGlare) ?? antiGlare
         slimFace = try c.decodeIfPresent(Double.self, forKey: .slimFace) ?? slimFace
         enlargeEyes = try c.decodeIfPresent(Double.self, forKey: .enlargeEyes) ?? enlargeEyes
         noseSlim = try c.decodeIfPresent(Double.self, forKey: .noseSlim) ?? noseSlim
@@ -245,6 +250,7 @@ extension BeautyParameters: Codable {
         try c.encode(blush, forKey: .blush)
         try c.encode(darkCircle, forKey: .darkCircle)
         try c.encode(nasolabial, forKey: .nasolabial)
+        try c.encode(antiGlare, forKey: .antiGlare)
         try c.encode(slimFace, forKey: .slimFace)
         try c.encode(enlargeEyes, forKey: .enlargeEyes)
         try c.encode(noseSlim, forKey: .noseSlim)

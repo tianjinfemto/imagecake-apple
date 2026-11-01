@@ -148,7 +148,7 @@ struct ImageDocument: Sendable {
             }
         }
         if !beauty.isRegionNeutral, faceGeometries.isEmpty {
-            notes.append("[no_landmarks] 没检测人脸关键点：亮眼/牙齿/唇色/腮红/祛黑眼圈/法令纹未生效")
+            notes.append("[no_landmarks] 没检测人脸关键点：亮眼/牙齿/唇色/腮红/祛黑眼圈/法令纹/镜片反光未生效")
         }
         if !beauty.isFaceShapeNeutral, faceGeometries.isEmpty {
             notes.append("[no_landmarks] 没检测人脸关键点：瘦脸/大眼等美型未生效")

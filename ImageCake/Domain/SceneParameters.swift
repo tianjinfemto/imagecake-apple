@@ -43,14 +43,26 @@ public struct HairParameters: Equatable, Sendable {
     public var shine: Double = 0
     /// 0…100 发色饱和（只作用于发区，不会顺手把皮肤染黄）。
     public var tint: Double = 0
+    /// 换发色的目标色（24bit hex）。只当 `colorStrength > 0` 时才有意义。
+    /// 默认给一个自然深棕而不是黑：黑发追黑看不出效果，验收时容易误判成"没跑"。
+    public var colorHex: UInt32 = 0x6B_4A_34
+    /// 0…100 换发色力度：发区内把色度往目标色的 A/B 靠，**亮度逐比特不动**。
+    /// 保亮度不是保守：发色的体积感全靠高光与阴影，连亮度一起换就成了一片塑料。
+    public var colorStrength: Double = 0
+    /// 0…100 祛碎发：只作用于发区掩码的**边界环带**（环带外与发团内部逐比特不动）。
+    public var tame: Double = 0
 
     public init() {}
 
-    public var isNeutral: Bool { smooth == 0 && shine == 0 && tint == 0 }
+    public var isNeutral: Bool { smooth == 0 && shine == 0 && tint == 0
+        && colorStrength == 0 && tame == 0 }
 
     public mutating func clamp() {
         smooth = smooth.clamped(to: 0 ... 100)
         shine = shine.clamped(to: -100 ... 100)
+        colorStrength = colorStrength.clamped(to: 0 ... 100)
+        tame = tame.clamped(to: 0 ... 100)
+        colorHex = colorHex & 0xFF_FFFF
         tint = tint.clamped(to: 0 ... 100)
     }
 }
@@ -185,7 +197,10 @@ extension MakeupParameters: Codable {
 }
 
 extension HairParameters: Codable {
-    enum CodingKeys: String, CodingKey { case smooth, shine, tint }
+    enum CodingKeys: String, CodingKey {
+        case smooth, shine, tint
+        case colorHex = "color_hex", colorStrength = "color_strength", tame
+    }
 
     public init(from decoder: Decoder) throws {
         self.init()
@@ -193,6 +208,9 @@ extension HairParameters: Codable {
         smooth = try c.decodeIfPresent(Double.self, forKey: .smooth) ?? smooth
         shine = try c.decodeIfPresent(Double.self, forKey: .shine) ?? shine
         tint = try c.decodeIfPresent(Double.self, forKey: .tint) ?? tint
+        colorHex = try c.decodeIfPresent(UInt32.self, forKey: .colorHex) ?? colorHex
+        colorStrength = try c.decodeIfPresent(Double.self, forKey: .colorStrength) ?? colorStrength
+        tame = try c.decodeIfPresent(Double.self, forKey: .tame) ?? tame
         clamp()
     }
 
@@ -201,6 +219,9 @@ extension HairParameters: Codable {
         try c.encode(smooth, forKey: .smooth)
         try c.encode(shine, forKey: .shine)
         try c.encode(tint, forKey: .tint)
+        try c.encode(colorHex, forKey: .colorHex)
+        try c.encode(colorStrength, forKey: .colorStrength)
+        try c.encode(tame, forKey: .tame)
     }
 }
 

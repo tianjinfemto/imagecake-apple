@@ -104,7 +104,85 @@ enum HairEngine {
             saturate(&pixels, size: size, weights: weights,
                      amount: BeautyParameters.unit(hair.tint))
         }
+        // 换色在上、碎发收尾：碎发动的是亮度，先上色就不会因为后一步
+        // 压亮度而看上去“颜色淡了一层”。
+        if hair.colorStrength > 0 {
+            recolor(&pixels, size: size, weights: weights,
+                    amount: BeautyParameters.unit(hair.colorStrength), hex: hair.colorHex)
+        }
+        if hair.tame > 0 {
+            tameFlyaways(&pixels, size: size, weights: weights,
+                         amount: BeautyParameters.unit(hair.tame))
+        }
         return DisplayImage(size: size, pixels: pixels)
+    }
+
+    // MARK: 换发色
+
+    /// 发区内把**色度**往目标色的 A/B 靠，亮度逐比特不动。
+    ///
+    /// 保亮度不是保守：发色的体积感全靠高光与阴影，连亮度一起换就成了一片
+    /// 塑料发片。与换天那个光照匹配用的是同一段数学（对立色里只推 A/B）。
+    /// `maxShift` 防止把深棕一路推到荧光蓝：0.22 大致是“深棕 → 酒红”的
+    /// 色度距离，再大就不属于头发了。
+    static func recolor(_ pixels: inout [Float], size: PixelSize, weights: [Float],
+                        amount: Double, hex: UInt32) {
+        guard amount > 0, size.pixelCount > 0, weights.count == size.pixelCount,
+              pixels.count >= size.pixelCount * 4 else { return }
+        let (r, g, b) = HexColor.rgb(hex)
+        let target = BeautyEngine.opponent(r: r, g: g, b: b)
+        let maxShift = 0.22
+        for i in 0 ..< size.pixelCount {
+            let w = Double(weights[i]) * amount
+            guard w > 0.001 else { continue }
+            let o = i * 4
+            let source = BeautyEngine.opponent(r: Double(pixels[o]),
+                                               g: Double(pixels[o + 1]),
+                                               b: Double(pixels[o + 2]))
+            let da = Swift.min(maxShift, Swift.max(-maxShift, target.a - source.a)) * w
+            let db = Swift.min(maxShift, Swift.max(-maxShift, target.b - source.b)) * w
+            let rgb = BeautyEngine.fromOpponent(l: source.l, a: source.a + da, b: source.b + db)
+            pixels[o] = Float(Swift.min(Swift.max(rgb.r, 0), 1))
+            pixels[o + 1] = Float(Swift.min(Swift.max(rgb.g, 0), 1))
+            pixels[o + 2] = Float(Swift.min(Swift.max(rgb.b, 0), 1))
+        }
+    }
+
+    // MARK: 祛碎发
+
+    /// 只作用在发区掩码的**边界环带**上：碎发就是发团轮廓外那些细亮线，
+    /// 既不该动发团内部（里面是真头发），也不该动背景。
+    ///
+    /// 环带用三角窗 `1 − |2w − 1| / 0.35` 而不是 `w(1−w)`：后者在 w = 0.9（发团
+    /// 内部）仍有 0.36 的权重，症状是把整片头发的边缘啃进一圈。三角窗在
+    /// w ≤ 0.325 与 w ≥ 0.675 处正好为 0，那两处逐比特不动，能当断言钉住。
+    /// 方向仍只降不升：压往邻域低频亮度，不会把碎发顶成更亮的白丝。
+    static func tameFlyaways(_ pixels: inout [Float], size: PixelSize, weights: [Float],
+                             amount: Double) {
+        guard amount > 0, size.pixelCount > 0, weights.count == size.pixelCount,
+              pixels.count >= size.pixelCount * 4 else { return }
+        let radius = Swift.max(2, Int(Double(size.longEdge) * 0.015))
+        let luma = RegionEnhance.lumaChannel(pixels, size: size)
+        guard luma.count == size.pixelCount else { return }
+        let base = BeautyEngine.blurredChannel(luma, size: size, radius: radius)
+        for i in 0 ..< size.pixelCount {
+            let w = Double(weights[i])
+            // 三角窗环带。
+            let band = Swift.max(0.0, 1.0 - abs(2.0 * w - 1.0) / 0.35)
+            let k = band * amount
+            guard k > 0.001 else { continue }
+            let o = i * 4
+            let l = Double(luma[i])
+            let refL = Double(base[i])
+            let excess = l - refL
+            guard excess > 0.05 else { continue }        // 只处理亮于邻域的碎丝
+            let soft = Swift.min(1.0, (excess - 0.05) / 0.12)
+            let drop = (excess - 0.05) * 0.75 * k * soft
+            guard drop > 0 else { continue }
+            for c in 0 ..< 3 {
+                pixels[o + c] = Float(Swift.max(0, Double(pixels[o + c]) - drop))
+            }
+        }
     }
 
     // MARK: 去毛躁

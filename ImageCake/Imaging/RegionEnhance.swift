@@ -47,6 +47,13 @@ enum RegionEnhance {
         let size = image.size
         var pixels = image.pixels
 
+        // 祛反光排在亮眼之前：两者都在眼区动亮度，顺序反了等于刚把眩光压下去
+        // 又把它顶回来（症状是拉满祛反光没效果）。
+        if beauty.antiGlare > 0 {
+            antiGlarePass(&pixels, size: size, geometries: geometries,
+                          amount: BeautyParameters.unit(beauty.antiGlare))
+        }
+
         if beauty.eyeBright > 0 {
             let weight = unionWeight(size: size, geometries) { eyeWeights($0, size: size) }
             modify(&pixels, size: size, weight: weight, amount: BeautyParameters.unit(beauty.eyeBright)) {
@@ -251,6 +258,76 @@ enum RegionEnhance {
             for c in 0 ..< 3 {
                 let source = Double(pixels[o + c])
                 pixels[o + c] = Float(source + (Double(low[o + c]) - source) * fill)
+            }
+        }
+    }
+
+    /// 镜片区域：每个眼圈的外接框向四周放大。
+    ///
+    /// 为什么用矩形而不是跟着眼睛形状：镜片比眼睛大一圈，而且它的形状由镜架
+    /// 决定——图里根本没有镜架信息（那要分割权重）。所以宁可把区域给大：
+    /// 真正的护栏是算子内部的"比邻域亮出来、且低饱和"两道门，不是掩码边界。
+    /// 上下不对称：镜圈往上放多于往下（眉以下到脸颊之间是额头与皮肤，不是镜片）。
+    static func lensWeights(_ geometry: FaceGeometry, size: PixelSize) -> [Float] {
+        var out = [UInt8](repeating: 0, count: size.pixelCount)
+        for ring in geometry.eyeRings where ring.count >= 3 {
+            let xs = ring.map { Double($0.x) }, ys = ring.map { Double($0.y) }
+            guard let minX = xs.min(), let maxX = xs.max(),
+                  let minY = ys.min(), let maxY = ys.max() else { continue }
+            let ew = maxX - minX, eh = maxY - minY
+            guard ew > 0.001, eh > 0.001 else { continue }
+            let x0 = Swift.max(0.0, minX - ew * 0.7), x1 = Swift.min(1.0, maxX + ew * 0.7)
+            let y0 = Swift.max(0.0, minY - eh * 1.0), y1 = Swift.min(1.0, maxY + eh * 0.6)
+            let rect = [CGPoint(x: x0, y: y0), CGPoint(x: x1, y: y0),
+                        CGPoint(x: x1, y: y1), CGPoint(x: x0, y: y1)]
+            union(into: &out, disk: RegionRaster.polygon(rect, size: size,
+                                                         feather: Swift.max(1, size.longEdge / 240)))
+        }
+        return SkinMask.weights(MaskBuffer(size: size, data: Data(out)), size: size)
+    }
+
+    // MARK: - 专项目 3：眼镜祛反光
+
+    /// 只压**镜片区里比邻域亮出来、且低饱和**的那一段。
+    ///
+    /// 为什么不编造反光底下的颜色：那张图里没有这个信息。把亮班往"邻域低频
+    /// 亮度 + 一点保留量"压回去能让镜片透出来，但拉不到底：`0.7` 的系数与
+    /// `keepFloor` 两道锁住"只降不升且不会压成个洞"（与黑眼圈那个算子相反的
+    /// 方向、同样的保守约定）。
+    /// 两道门缺一不可：没有亮度门（≥0.45）会把暗部噪声当反光；没有饱和门
+    /// 会把彩色镜片的边缘和嘴唇一起压掉。
+    static func antiGlarePass(_ pixels: inout [Float], size: PixelSize,
+                              geometries: [FaceGeometry], amount: Double) {
+        guard amount > 0, size.pixelCount > 0 else { return }
+        let weight = unionWeight(size: size, geometries) { lensWeights($0, size: size) }
+        guard weight.count == size.pixelCount else { return }
+        var maxWeight = Float(0)
+        for value in weight { maxWeight = Swift.max(maxWeight, value) }
+        guard maxWeight > 0 else { return }
+
+        let luma = lumaChannel(pixels, size: size)
+        // 参考半径用脸宽而不是长边比例：与黑眼圈同一个理由（远近景都要量到
+        // 镜片周围的真实亮度而不是眩光自己）。
+        let faceWidth = geometries.compactMap { $0.faceWidth > 0 ? $0.faceWidth : nil }.min() ?? 0.2
+        let radius = Swift.max(4, Int(faceWidth * 0.30 * Double(size.width)))
+        let base = BeautyEngine.blurredChannel(luma, size: size, radius: radius)
+
+        for i in 0 ..< size.pixelCount {
+            let w = Double(weight[i]) * amount
+            guard w > 0.001 else { continue }
+            let o = i * 4
+            let r = Double(pixels[o]), g = Double(pixels[o + 1]), b = Double(pixels[o + 2])
+            let mx = Swift.max(r, Swift.max(g, b)), mn = Swift.min(r, Swift.min(g, b))
+            let sat = mx <= 1e-6 ? 0.0 : (mx - mn) / mx
+            let l = Double(ColorMath.luma(pixels[o], pixels[o + 1], pixels[o + 2]))
+            guard l >= 0.45, sat <= 0.34 else { continue }
+            let keepFloor = Double(base[i]) + 0.06
+            guard l > keepFloor else { continue }
+            let soft = Swift.min(1.0, (l - keepFloor) / 0.12)
+            let drop = (l - keepFloor) * 0.7 * w * soft
+            guard drop > 0 else { continue }
+            for c in 0 ..< 3 {
+                pixels[o + c] = Float(Swift.max(0, Double(pixels[o + c]) - drop))
             }
         }
     }

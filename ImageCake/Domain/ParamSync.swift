@@ -80,6 +80,7 @@ enum ParamSync {
             beauty.blush = source.beauty.blush
             beauty.darkCircle = source.beauty.darkCircle
             beauty.nasolabial = source.beauty.nasolabial
+            beauty.antiGlare = source.beauty.antiGlare
             out.beauty = beauty
             // 造型三组跟美肤一起同步：它们都是"改画面里的人"，
             // 而且都靠关键点定位，逐张重派生。
