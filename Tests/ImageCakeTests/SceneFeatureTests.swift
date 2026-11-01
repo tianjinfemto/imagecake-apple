@@ -72,7 +72,7 @@ final class SceneFeatureTests: XCTestCase {
         XCTAssertGreaterThan(brow[browPeak], 0.4, "眉带必须有实权重")
         // 眉带必须落在眼睛上方（主峰 y 小于虹膜 y）。这条抓的是"眉毛索引错了"。
         let irisY = geometry.irisCenters[0].y * CGFloat(size.height)
-        XCTAssertLessThan(browPeak / size.width, Double(irisY).rounded(.down) - 2,
+        XCTAssertLessThan(browPeak / size.width, Double(irisY).rounded(.down) - 2.0,
                           "眉带跑到眼睛下方 = 眉毛索引表错了")
 
         let base = solid(size, skin.r, skin.g, skin.b)
@@ -373,13 +373,16 @@ final class SceneFeatureTests: XCTestCase {
         let sky: (Double, Double, Double) = (0.24, 0.47, 0.80)
         let wall: (Double, Double, Double) = (0.15, 0.16, 0.18)
         let grass: (Double, Double, Double) = (0.20, 0.55, 0.20)
+        // 分段边界用显式 Double 换算：`Int * Double` 在这里推不出混型乘法，
+        // 而 switch 里的部分区间写法又把同一个表达式报成 unary operator 错。
+        let skyEnd = Int(Double(size.height) * 0.30)
+        let wallEnd = Int(Double(size.height) * 0.55)
+        let grassEnd = Int(Double(size.height) * 0.62)
         for y in 0 ..< size.height {
-            switch y {
-            case ..< Int(size.height * 0.3): row(y, sky)
-            case ..< Int(size.height * 0.55): row(y, wall)
-            case ..< Int(size.height * 0.62): row(y, grass)
-            default: row(y, sky)
-            }
+            if y < skyEnd { row(y, sky) }
+            else if y < wallEnd { row(y, wall) }
+            else if y < grassEnd { row(y, grass) }
+            else { row(y, sky) }        // 与顶边不相连的同色蓝
         }
         return DisplayImage(size: size, pixels: pixels)
     }
@@ -612,15 +615,16 @@ final class SceneFeatureTests: XCTestCase {
         let dark = LongExposureEngine.stack([dim, bright], mode: .darkest)
         XCTAssertNotNil(light)
         XCTAssertNotNil(dark)
-        XCTAssertEqual(light?.pixels[0] ?? 0, 0.8, accuracy: 1e-4, "取亮 = 保亮点（光轨/星轨）")
-        XCTAssertEqual(dark?.pixels[0] ?? 0, 0.2, accuracy: 1e-4, "取暗 = 去路人（背景是暗的那一侧）")
+        XCTAssertEqual(light?.image.pixels[0] ?? 0, 0.8, accuracy: 1e-4, "取亮 = 保亮点（光轨/星轨）")
+        XCTAssertEqual(dark?.image.pixels[0] ?? 0, 0.2, accuracy: 1e-4, "取暗 = 去路人（背景是暗的那一侧）")
         let mean = LongExposureEngine.stack([dim, bright], mode: .average)
-        XCTAssertEqual(mean?.pixels[0] ?? 0, 0.5, accuracy: 1e-3, "平均在不动的地方就是均值")
+        XCTAssertEqual(mean?.image.pixels[0] ?? 0, 0.5, accuracy: 1e-3, "平均在不动的地方就是均值")
     }
 
     // MARK: - 8. 联机拍摄的决策层
 
-    private func device(_ id: String, kind: String, usable: Bool = true) -> TetheredDevice {
+    /// 设备工厂。第二个形参不设标签，调用处写 `device("a", "external")`。
+    private func device(_ id: String, _ kind: String, usable: Bool = true) -> TetheredDevice {
         TetheredDevice(id: id, name: "Cam-\(id)", kind: kind, isUsable: usable)
     }
 
