@@ -126,21 +126,28 @@ final class FaceStrengthTests: XCTestCase {
         XCTAssertNotEqual(both.pixels, onlySecond.pixels, "默认时第一张脸要真参与")
     }
 
-    func testStrongerThanGlobalActuallyMovesFurther() {
+    func testStrengthScalesMonotonicallyAgainstTheOriginal() {
         guard let a = face(offset: 0) else { XCTFail(); return }
-        let beauty = beautyWithFaceEffects()
+        // 基础力度故意给得很小：位移场有 `clampMagnitude` 封顶，拿满幅度再去跑 200%
+        // 会两边都撞到同一上限，那时"更大"本就该不成立，断言也就测不到力度缩放了。
+        var beauty = BeautyParameters()
+        beauty.slimFace = 18
+        beauty.enlargeEyes = 12
         let image = checker(8)
         var half = FaceStrengthParameters(); half.scales = [50]
         var double = FaceStrengthParameters(); double.scales = [200]
-        let base = ShapeWarp.apply(image, faces: [a], body: nil, beauty: beauty)
+        let full = ShapeWarp.apply(image, faces: [a], body: nil, beauty: beauty)
         let weak = ShapeWarp.apply(image, faces: [a], body: nil, beauty: beauty, faceStrength: half)
         let strong = ShapeWarp.apply(image, faces: [a], body: nil, beauty: beauty, faceStrength: double)
 
-        func changed(_ out: DisplayImage) -> Int {
-            out.pixels.indices.filter { abs(Double(out.pixels[$0]) - Double(base.pixels[$0])) > 1e-4 }.count
+        // 参照物必须是**未变形的原图**：上一版拿 `changed(base)` 当基准，而 base 就是
+        // 它自己，永远是 0，所以"50% 要比它小"必假。
+        func moved(_ out: DisplayImage) -> Int {
+            out.pixels.indices.filter { abs(Double(out.pixels[$0]) - Double(image.pixels[$0])) > 1e-4 }.count
         }
-        XCTAssertGreaterThan(changed(strong), changed(base), "200% 要比跟随全局改得更多")
-        XCTAssertLessThan(changed(weak), changed(base), "50% 要比跟随全局改得更少")
+        XCTAssertGreaterThan(moved(full), 0, "夹具得先真能产位移，否则下面两条是空的")
+        XCTAssertLessThan(moved(weak), moved(full), "50% 要比跟随全局改得更少")
+        XCTAssertGreaterThan(moved(strong), moved(full), "200% 要比跟随全局改得更多")
     }
 
     // MARK: - 文档、预设与同步
