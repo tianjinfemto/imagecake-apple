@@ -54,10 +54,25 @@ final class RetouchExtrasTests: XCTestCase {
         XCTAssertEqual(peakCol / Double(size.width), Double(iris.x), accuracy: 0.12,
                        "镜片区横向应以眼睛为中心")
         XCTAssertLessThan(peakRow / Double(size.height), Double(iris.y) + 0.05,
-                          "镜片区应主要压在眼睛上方，不是压到脸颊")
-        // 下巴那个位置（0.72 高）不许被算进镜片
-        let chin = Int(0.72 * Double(size.height)) * size.width + Int(0.5 * Double(size.width))
-        XCTAssertEqual(weights[chin], 0, "下巴被圈进镜片区 = 外接框放大过头")
+                          "镜片区应主要压在眼睛上方，不是压到下巴")
+
+        // 把实际非零的行范围算出来当证据：上一轮 CI 报下巴那一行有 91/255，
+        // 而按眼圈矩形外推只能到 0.52 高。光推理分不出谁对，所以这条断言同时
+        // 报出非零行范围（失败日志就是证据，不用再来一轮）。
+        var firstRow = size.height, lastRow = -1
+        for i in 0 ..< size.pixelCount where weights[i] > 0.01 {
+            let row = i / size.width
+            if row < firstRow { firstRow = row }
+            if row > lastRow { lastRow = row }
+        }
+        let irisRow = Double(iris.y) * Double(size.height)
+        let span = "非零行 \(firstRow)..\(lastRow)，眼圈行 ~\(Int(irisRow))"
+        XCTAssertLessThanOrEqual(Double(lastRow), irisRow + 12.0,
+                                 "镜片区下边界不得低过眼睛 12px：\(span)")
+        XCTAssertGreaterThanOrEqual(Double(firstRow), irisRow - 20.0,
+                                    "镜片区上边界不得高过额头：\(span)")
+        XCTAssertEqual(weights[90 * size.width + 50], 0,
+                       "row 90（唇以下）不该有任何权重：\(span)")
     }
 
     // MARK: - 2. 眼镜祛反光
@@ -209,8 +224,8 @@ final class RetouchExtrasTests: XCTestCase {
         // 蓝黑目标与浅亚麻的 B 轴差得比 maxShift 还远，正好用来钉上限。
         HairEngine.recolor(&pixels, size: size, weights: weights, amount: 1.0, hex: 0x2C_33_42)
         let before = chromaOf(image.pixels, 0), after = chromaOf(pixels, 0)
-        XCTAssertLessThanOrEqual(abs(after.1 - before.1), 0.22 + 1e-9,
-                                 "B 轴位移被 maxShift 锁住：目标色再进也不许推到不属于头发的颜色")
+        XCTAssertLessThanOrEqual(abs(after.1 - before.1), 0.22 + 1e-5,
+                                 "B 轴位移被 maxShift 锁住（留 Float 往返余量）：目标色再进也不许推到不属于头发的颜色")
         XCTAssertGreaterThan(abs(after.1 - before.1), 0.15,
                              "但这条上限必须真的撞到，否则上面那条是空的")
     }
