@@ -350,11 +350,19 @@ enum RegionRaster {
     }
 
     /// 两个掩码相减（保留 a 中比 b 大的部分）。用于"唇环 − 唇内 = 牙齿之外"。
+    ///
+    /// 必须先升到 Int 再减：`left[i] - right[i]` 是 UInt8 减法，一旦右值更大
+    /// 就是**运行时溢出 trap**（CI 上表现为 Signal 5），而 `Swift.max(0, …)` 是在
+    /// 溢出之后才求值的，拦不住。羽化后的唇内几乎必然会在某些像素上大于唇环，
+    /// 所以这不是边界情况 —— 不转 Int 的话唇色一开就崩。
     static func subtract(_ a: MaskBuffer, _ b: MaskBuffer) -> MaskBuffer {
         guard a.size == b.size, !a.isEmpty, !b.isEmpty else { return a }
         let left = [UInt8](a.data), right = [UInt8](b.data)
+        // 尺寸同但 data 长度不一致属于构造错误；这里取短的跑完而不是 trap ——
+        // 生成阶段崩掉比少一环严重得多。
+        let count = Swift.min(left.count, right.count)
         var out = [UInt8](repeating: 0, count: left.count)
-        for i in 0 ..< left.count { out[i] = Swift.max(0, left[i] - right[i]) }
+        for i in 0 ..< count { out[i] = UInt8(Swift.max(0, Int(left[i]) - Int(right[i]))) }
         return MaskBuffer(size: a.size, data: Data(out))
     }
 
