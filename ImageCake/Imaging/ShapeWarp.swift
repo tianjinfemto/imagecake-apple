@@ -84,20 +84,25 @@ enum ShapeWarp {
 
     /// 把开着的项累加成一张位移场。全关或没有对应锚点 → nil。
     ///
-    /// 多人脸走的是同一个入口：每张脸的锚点都往同一张场上累加，所以
+    /// 多人脸走的是同一个入口：每张脸的控制点都往同一张场上累加，所以
     /// 合影里"推了 A 的脸"不会把 B 的脸抹掉——两张脸的作用域几乎不相交
     /// （半径 ≈ 0.55 脸宽），相交处也是线性叠加，与手动液化同一条口径。
+    ///
+    /// `faceStrength` 是按位置的逐脸力度（下标与 `faces` 同序，而 `faces` 已按面积
+    /// 从大到小排好），所以它只在本循环里按脸生效，身体项不参与。
     static func build(size: PixelSize, faces: [FaceGeometry], body: BodyAnchors?,
-                      beauty: BeautyParameters) -> WarpField? {
+                      beauty: BeautyParameters,
+                      faceStrength: FaceStrengthParameters = FaceStrengthParameters()) -> WarpField? {
         guard size.pixelCount > 0, !(beauty.isShapeNeutral) else { return nil }
         var field = WarpField(size: size)
         var touched = false
-
-        for face in faces {
-            // 绝不能写成 `touched = touched || applyFaceEdits(...)`：`||` 会短路，
+    
+        for (index, face) in faces.enumerated() {
+            // 这里不能写成 `touched = touched || applyFaceEdits(...)`：`||` 会短路，
             // 第一张脸一旦生效，后面每张脸的函数调用都被跳过——症状正是
             // "合影里只磨最大那张脸"，而且只有断言能抓出来。
-            let edited = applyFaceEdits(&field, size: size, face: face, beauty: beauty)
+            let scaled = beauty.scaled(by: faceStrength.factor(for: index))
+            let edited = applyFaceEdits(&field, size: size, face: face, beauty: scaled)
             touched = touched || edited
         }
         if let body {
@@ -116,8 +121,10 @@ enum ShapeWarp {
     }
 
     static func apply(_ image: DisplayImage, faces: [FaceGeometry], body: BodyAnchors?,
-                      beauty: BeautyParameters, protection: MaskBuffer? = nil) -> DisplayImage {
-        guard let field = build(size: image.size, faces: faces, body: body, beauty: beauty) else { return image }
+                      beauty: BeautyParameters, protection: MaskBuffer? = nil,
+                      faceStrength: FaceStrengthParameters = FaceStrengthParameters()) -> DisplayImage {
+        guard let field = build(size: image.size, faces: faces, body: body, beauty: beauty,
+                                faceStrength: faceStrength) else { return image }
         return field.resample(image, protection: protection)
     }
 

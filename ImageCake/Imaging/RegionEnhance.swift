@@ -42,20 +42,28 @@ enum RegionEnhance {
         apply(image, geometries: geometry.map { [$0] } ?? [], beauty: beauty)
     }
 
-    static func apply(_ image: DisplayImage, geometries: [FaceGeometry], beauty: BeautyParameters) -> DisplayImage {
+    static func apply(_ image: DisplayImage, geometries: [FaceGeometry], beauty: BeautyParameters,
+                      faceStrength: FaceStrengthParameters = FaceStrengthParameters()) -> DisplayImage {
         guard !beauty.isRegionNeutral, !geometries.isEmpty, image.size.pixelCount > 0 else { return image }
         let size = image.size
         var pixels = image.pixels
+        // 逐脸力度在这一路是**按脸缩放权重**而不是缩放 amount：每个 pass 里的位移
+        // 都是 `amount × weight` 的线性函数（包含三个阀值 pass 里的 `w` 乘子），
+        // 所以两者等价；而权重在 union 这一步按脸乘一次，就不必把七个 pass 重写成
+        // 逐脸循环（那会改动牙齿取样、两脸重叠取大这些已验证的行为）。
+        func faceWeighted(_ body: (FaceGeometry) -> [Float]) -> [Float] {
+            unionWeight(size: size, geometries, faceStrength: faceStrength, body)
+        }
 
         // 祛反光排在亮眼之前：两者都在眼区动亮度，顺序反了等于刚把眩光压下去
         // 又把它顶回来（症状是拉满祛反光没效果）。
         if beauty.antiGlare > 0 {
             antiGlarePass(&pixels, size: size, geometries: geometries,
-                          amount: BeautyParameters.unit(beauty.antiGlare))
+                          amount: BeautyParameters.unit(beauty.antiGlare), faceStrength: faceStrength)
         }
 
         if beauty.eyeBright > 0 {
-            let weight = unionWeight(size: size, geometries) { eyeWeights($0, size: size) }
+            let weight = faceWeighted { eyeWeights($0, size: size) }
             modify(&pixels, size: size, weight: weight, amount: BeautyParameters.unit(beauty.eyeBright)) {
                 (l, a, b) in
                 // 瞳孔不抬：L 低于 0.12 的像素（黑瞳核心）原样保留。
@@ -65,7 +73,7 @@ enum RegionEnhance {
             }
         }
         if beauty.teethWhiten > 0 {
-            let weight = unionWeight(size: size, geometries) { teethWeights($0, size: size, pixels: pixels) }
+            let weight = faceWeighted { teethWeights($0, size: size, pixels: pixels) }
             modify(&pixels, size: size, weight: weight, amount: BeautyParameters.unit(beauty.teethWhiten)) {
                 (l, a, b) in
                 let deyellow = Swift.max(0, -b) * 0.85 + 0.03
@@ -73,7 +81,7 @@ enum RegionEnhance {
             }
         }
         if beauty.lipColor > 0 {
-            let weight = unionWeight(size: size, geometries) { lipWeights($0, size: size) }
+            let weight = faceWeighted { lipWeights($0, size: size) }
             modify(&pixels, size: size, weight: weight, amount: BeautyParameters.unit(beauty.lipColor)) {
                 (l, a, b) in
                 // 提饱和 + 给一点红底（A 轴正向）。灰唇也能上到色，因为 0.05
@@ -82,7 +90,7 @@ enum RegionEnhance {
             }
         }
         if beauty.blush > 0 {
-            let weight = unionWeight(size: size, geometries) { cheekWeights($0, size: size) }
+            let weight = faceWeighted { cheekWeights($0, size: size) }
             modify(&pixels, size: size, weight: weight, amount: BeautyParameters.unit(beauty.blush)) {
                 (l, a, b) in
                 (l - 0.03, a + 0.16, b - 0.04)
@@ -90,11 +98,11 @@ enum RegionEnhance {
         }
         if beauty.darkCircle > 0 {
             darkCirclePass(&pixels, size: size, geometries: geometries,
-                           amount: BeautyParameters.unit(beauty.darkCircle))
+                           amount: BeautyParameters.unit(beauty.darkCircle), faceStrength: faceStrength)
         }
         if beauty.nasolabial > 0 {
             nasolabialPass(&pixels, size: size, geometries: geometries,
-                           amount: BeautyParameters.unit(beauty.nasolabial))
+                           amount: BeautyParameters.unit(beauty.nasolabial), faceStrength: faceStrength)
         }
         return DisplayImage(size: size, pixels: pixels)
     }
@@ -194,9 +202,10 @@ enum RegionEnhance {
     /// 比暗的黑眼圈难看得多。抬量还乘了一个 `deficit/0.22` 的软过渡，
     /// 所以本来就不暗的像素几乎不动（不会把颧骨高光顶出去）。
     static func darkCirclePass(_ pixels: inout [Float], size: PixelSize,
-                               geometries: [FaceGeometry], amount: Double) {
+                               geometries: [FaceGeometry], amount: Double,
+                               faceStrength: FaceStrengthParameters = FaceStrengthParameters()) {
         guard amount > 0, size.pixelCount > 0 else { return }
-        let weight = unionWeight(size: size, geometries) { underEyeWeights($0, size: size) }
+        let weight = unionWeight(size: size, geometries, faceStrength: faceStrength) { underEyeWeights($0, size: size) }
         guard weight.count == size.pixelCount else { return }
         var maxWeight = Float(0)
         for value in weight { maxWeight = Swift.max(maxWeight, value) }
@@ -235,9 +244,10 @@ enum RegionEnhance {
     /// 只允许填掉宽度在一两个像素到几个像素之间的暗线。半径一大，低频场就
     /// 把脸型本身的明暗也抹平了，症状是"法令纹淡了但脸也扁了"。
     static func nasolabialPass(_ pixels: inout [Float], size: PixelSize,
-                               geometries: [FaceGeometry], amount: Double) {
+                               geometries: [FaceGeometry], amount: Double,
+                               faceStrength: FaceStrengthParameters = FaceStrengthParameters()) {
         guard amount > 0, size.pixelCount > 0 else { return }
-        let weight = unionWeight(size: size, geometries) { nasolabialWeights($0, size: size) }
+        let weight = unionWeight(size: size, geometries, faceStrength: faceStrength) { nasolabialWeights($0, size: size) }
         thinDarkLinePass(&pixels, size: size, weight: weight, amount: amount)
     }
 
@@ -321,9 +331,10 @@ enum RegionEnhance {
     /// 两道门缺一不可：没有亮度门（≥0.45）会把暗部噪声当反光；没有饱和门
     /// 会把彩色镜片的边缘和嘴唇一起压掉。
     static func antiGlarePass(_ pixels: inout [Float], size: PixelSize,
-                              geometries: [FaceGeometry], amount: Double) {
+                              geometries: [FaceGeometry], amount: Double,
+                              faceStrength: FaceStrengthParameters = FaceStrengthParameters()) {
         guard amount > 0, size.pixelCount > 0 else { return }
-        let weight = unionWeight(size: size, geometries) { lensWeights($0, size: size) }
+        let weight = unionWeight(size: size, geometries, faceStrength: faceStrength) { lensWeights($0, size: size) }
         guard weight.count == size.pixelCount else { return }
         var maxWeight = Float(0)
         for value in weight { maxWeight = Swift.max(maxWeight, value) }
@@ -359,13 +370,25 @@ enum RegionEnhance {
     // MARK: - 小工具
 
     /// 逐张脸算权重再取大（两脸重叠处不翻倍）。
+    ///
+    /// `faceStrength` 按脸乘各自的比例（下标与 `geometries` 同序）：这里取的仍是
+    /// 乘过之后的最大值，所以重叠处仍然不翻倍。
     static func unionWeight(size: PixelSize, _ geometries: [FaceGeometry],
+                            faceStrength: FaceStrengthParameters = FaceStrengthParameters(),
                             _ body: (FaceGeometry) -> [Float]) -> [Float] {
         var out = [Float](repeating: 0, count: size.pixelCount)
-        for geometry in geometries {
+        for (index, geometry) in geometries.enumerated() {
+            let factor = faceStrength.factor(for: index)
             let weight = body(geometry)
             guard weight.count == out.count else { continue }
-            for i in 0 ..< out.count where weight[i] > out[i] { out[i] = weight[i] }
+            if factor == 1 {
+                for i in 0 ..< out.count where weight[i] > out[i] { out[i] = weight[i] }
+            } else {
+                for i in 0 ..< out.count {
+                    let scaled = weight[i] * Float(factor)
+                    if scaled > out[i] { out[i] = scaled }
+                }
+            }
         }
         return out
     }

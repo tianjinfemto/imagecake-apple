@@ -109,6 +109,11 @@ enum ParamSync {
             // 颈纹/妊娠纹同理：力度可同步（全批按同一个深浅填细线），
             // 涂在哪一块不可同步（逐张的身体不一样）。
             out.bodyLine = source.bodyLine
+            // 逐脸力度也跟美型同组。它按位置（第几张脸）对应，所以：**同批合影**
+            // （同样这几个人）抄过去正好；脸数不同的图多出来的脸跟随全局、
+            // 多出来的值被忽略（见 `FaceStrengthParameters`），不会把上一张的
+            // 设定扫到不相干的人头上。
+            out.faceStrength = source.faceStrength
         }
         if groups.contains(.style) {
             out.filter = source.filter

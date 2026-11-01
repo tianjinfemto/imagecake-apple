@@ -93,6 +93,7 @@ struct CanvasView: View {
                 }
                 brushOverlay(viewport)
                 cloneSourceMarker(viewport)
+                faceOutline(viewport)
                 if image == nil {
                     Text("没有打开图片")
                         .font(.system(size: 12))
@@ -179,11 +180,37 @@ struct CanvasView: View {
         }
     }
 
+    /// 逐脸力度的选脸反馈：选中的那张永远画一圈框（不然面板上写"第2张脸"
+    /// 而用户不知是哪张）；处于点脸模式时把**所有**脸都画上淡框，告诉用户
+    /// 哪里可以点。框只是叠加层，不进渲染也不进导出。
+    @ViewBuilder
+    private func faceOutline(_ viewport: CanvasViewport) -> some View {
+        if let faces = model.document?.faceGeometries, !faces.isEmpty {
+            ForEach(Array(faces.enumerated()), id: \.offset) { index, face in
+                let bounds = face.bounds
+                if bounds.width > 0, bounds.height > 0,
+                   model.faceSelection == index || model.facePickingMode {
+                    let origin = viewport.viewPoint(CGPoint(x: bounds.minX, y: bounds.minY))
+                    let far = viewport.viewPoint(CGPoint(x: bounds.maxX, y: bounds.maxY))
+                    let selected = model.faceSelection == index
+                    Rectangle()
+                        .stroke(selected ? Tokens.accent : Tokens.accent.opacity(0.45),
+                                style: StrokeStyle(lineWidth: selected ? 2 : 1,
+                                                   dash: selected ? [] : [4, 3]))
+                        .frame(width: max(4, far.x - origin.x), height: max(4, far.y - origin.y))
+                        .position(x: (origin.x + far.x) / 2, y: (origin.y + far.y) / 2)
+                        .allowsHitTesting(false)
+                }
+            }
+        }
+    }
+
     // MARK: - 手势
 
     private func contextGesture(_ viewport: CanvasViewport) -> some Gesture {
-        // 取样模式下用 minimumDistance: 0，让轻点也能触发 onEnded。
-        let minDistance: CGFloat = model.clonePickingMode ? 0 : 2
+        // 取样与选脸模式下用 minimumDistance: 0，让轻点也能触发 onEnded。
+        let picking = model.clonePickingMode || model.facePickingMode
+        let minDistance: CGFloat = picking ? 0 : 2
         return DragGesture(minimumDistance: minDistance)
             .onChanged { value in
                 if isPinching {
@@ -196,7 +223,7 @@ struct CanvasView: View {
                     lastPanLocation = value.location
                     return
                 }
-                if model.clonePickingMode {
+                if model.clonePickingMode || model.facePickingMode {
                     brushCursor = value.location
                     return
                 }
@@ -214,6 +241,13 @@ struct CanvasView: View {
                 if model.clonePickingMode {
                     if let normalized = viewport.normalized(value.startLocation) {
                         model.setCloneSource(normalized)
+                    }
+                    brushCursor = nil
+                    return
+                }
+                if model.facePickingMode {
+                    if let normalized = viewport.normalized(value.startLocation) {
+                        model.pickFace(at: normalized)
                     }
                     brushCursor = nil
                     return

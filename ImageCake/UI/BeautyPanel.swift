@@ -24,9 +24,94 @@ struct BeautyPanel: View {
             // 不同资产（脸、发区、手、涂抹区），所以单独一块而不是混进滑杆里。
             MakeupPanel().environmentObject(model)
             faceShapeSection
+            faceStrengthSection
             bodyShapeSection
             oneClickSection
         }
+    }
+
+    // MARK: - 逐脸力度（合影）
+
+    /// 区域美化与脸型那两组靠关键点，所以逐脸缩放只作用于它们。
+    /// 下标就是"第几张脸（面积从大到小）"，面板上直说是序号而不假装认识人。
+    private var faceStrengthSection: some View {
+        SectionCard(title: "逐脸力度", subtitle: faceStrengthSubtitle) {
+            if faceCount == 0 {
+                Text("没检测关键点就逐不了脸。推一下上面任一滑杆不会自动帮你检测，因为那是一次额外的视觉推理。")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Tokens.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 64), spacing: 6)], spacing: 6) {
+                    ForEach(0 ..< faceCount, id: \.self) { index in
+                        faceChip("第\(index + 1)张", selected: model.faceSelection == index) {
+                            model.faceSelection = index
+                        }
+                    }
+                }
+
+                HStack(spacing: 8) {
+                    Button {
+                        model.facePickingMode.toggle()
+                    } label: {
+                        Label(model.facePickingMode ? "取消点脸" : "在画布上点脸",
+                              systemImage: "hand.tap")
+                    }
+                    .buttonStyle(.bordered)
+                    Button("全部跟随全局") { model.resetFaceScales() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(model.document?.params.faceStrength.isNeutral ?? true)
+                }
+
+                if let index = model.faceSelection, index < faceCount {
+                    SliderRow(title: "第\(index + 1)张脸的力度", range: 0 ... 200,
+                              format: { percentFace($0) },
+                              value: Binding(get: { model.faceScalePercent(for: index) },
+                                             set: { model.setFaceScale($0, for: index) }))
+                    Button("这张改回跟随全局") { model.followGlobalFace(index) }
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                        .disabled(model.faceScalePercent(for: index) == 100)
+                } else {
+                    Text("选上面一张脸（或点画布上的人）才能单独调它。")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Tokens.textSecondary)
+                }
+
+                Text("100 = 跟随全局滑杆，0 = 这张脸不动，200 = 比全局更强一倍。作用范围只包含靠关键点的那两组（五官区域美化与脸型）；皮肤磨皮与美白不拆（拆了会在脸与脸之间出现质感不一致），身形项不属于任何一张脸。下标按脸大小排序，所以换图或重新检测后会对应到另一张脸——面板会自动取消选中。")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Tokens.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var faceStrengthSubtitle: String {
+        let set = model.document?.params.faceStrength.scales.filter { $0 != 100 }.count ?? 0
+        if faceCount == 0 { return "需关键点" }
+        return set == 0 ? "\(faceCount) 张脸均跟随全局" : "已单独调 \(set) 张"
+    }
+
+    private func percentFace(_ value: Double) -> String {
+        if value == 100 { return "跟随全局" }
+        if value == 0 { return "不动" }
+        return "\(Int(value.rounded()))%"
+    }
+
+    /// 选脸的小按钮。`chip` 是 StylePanel 的私有辅助，不在这里依赖它（
+    /// 把两个面板耦在一个私有视图上，改一个会碎另一个）。
+    private func faceChip(_ title: String, selected: Bool,
+                          action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 10))
+                .padding(.vertical, 4)
+                .frame(maxWidth: .infinity)
+                .background(selected ? Tokens.accent.opacity(0.18) : Color.clear)
+                .cornerRadius(6)
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - 依赖状态

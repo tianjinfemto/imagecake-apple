@@ -89,6 +89,12 @@ final class EditorModel: ObservableObject {
     @Published var selectionMode = false
     /// 画布上的框选（归一化，y 向下）。
     @Published var selection: CGRect?
+    /// 逐脸力度当前选的是第几张脸（下标与 `faceGeometries` 同序，即面积从大到小）。
+    /// nil = 未选，面板上逐脸那一卡不显示滑杆。
+    @Published var faceSelection: Int?
+    /// 点脸模式：开了之后画布上点一下就是选脸（与图章的"点一下设锚点"同一交互，
+    /// 所以复用同一条命中通道而不是另发明一套手势）。
+    @Published var facePickingMode = false
     @Published var selectionEnabled = true
     /// 当前笔刷工具。.none 时画布单指拖走框选；否则走笔刷落笔。
     @Published var brushTool: BrushTool = .none {
@@ -411,6 +417,11 @@ final class EditorModel: ObservableObject {
             history.reset(to: EditSnapshot(doc))
             selection = nil
             selectionMode = false
+            // 逐脸力度是按位置的，换图/重新检测后下标对应的是另一张脸，所以必须清。
+            // 不滑到默认值的理由只有一个：脸数变了，拿着上一张的"第3张 = 40%"继续用
+            // 就是在 silently 改一个不相干的人。
+            faceSelection = nil
+            facePickingMode = false
             showMask = false
             showClipping = false
             clippingOverlay = nil
@@ -473,6 +484,82 @@ final class EditorModel: ObservableObject {
         commitHistoryNow()
         scheduleRender()
         status = "保护 \(document?.brush.protection.count ?? 0) 笔"
+    }
+
+    // MARK: - 逐脸力度（合影）
+
+    /// 共几张脸（没检测过就是 0，面板据此决定要不要出这一卡）。
+    var faceCount: Int { document?.faceGeometries.count ?? 0 }
+
+    /// 第 index 张脸当前力度百分比（未设过 = 100 跟随全局）。
+    func faceScalePercent(for index: Int) -> Double {
+        guard let doc = document, doc.params.faceStrength.scales.indices.contains(index)
+        else { return 100 }
+        return doc.params.faceStrength.scales[index]
+    }
+
+    func setFaceScale(_ percent: Double, for index: Int) {
+        updateParams { $0.faceStrength.setFactor(percent, for: index) }
+        faceSelection = index
+    }
+
+    /// 把这张脸改回"跟随全局"。改完如果整串都回到 100 就清成空数组，
+    /// 不然预设/sidecar 里会攒一串其实什么都没改的 100。
+    func followGlobalFace(_ index: Int) {
+        guard let doc = document, doc.params.faceStrength.scales.indices.contains(index) else { return }
+        updateParams { $0.faceStrength.scales[index] = 100 }
+        collapseFaceStrengthsIfAllFollow()
+    }
+
+    func resetFaceScales() {
+        updateParams { $0.faceStrength.scales = [] }
+        status = "已让所有脸回到跟随全局"
+    }
+
+    private func collapseFaceStrengthsIfAllFollow() {
+        guard let doc = document else { return }
+        if doc.params.faceStrength.isNeutral {
+            updateParams { $0.faceStrength.scales = [] }
+        }
+    }
+
+    /// 画布上点一下选脸。优先取"包含该点"的脸（多点重叠时取面积最小的那张，
+    /// 因为那才是用户看上去点中的那张）；都不包含时退回中心最近。
+    func faceIndex(at point: CGPoint) -> Int? {
+        guard let faces = document?.faceGeometries, !faces.isEmpty else { return nil }
+        var containing: [(index: Int, area: Double)] = []
+        for (index, face) in faces.enumerated() {
+            let b = face.bounds
+            guard b.width > 0, b.height > 0, b.contains(point) else { continue }
+            containing.append((index, Double(b.width * b.height)))
+        }
+        if let pick = containing.min(by: { $0.area < $1.area })?.index {
+            return pick
+        }
+        var best: Int?
+        var bestDistance = Double.greatestFiniteMagnitude
+        for (index, face) in faces.enumerated() {
+            let b = face.bounds
+            guard b.width > 0 else { continue }
+            let dx = Double(point.x - b.midX), dy = Double(point.y - b.midY)
+            let distance = dx * dx + dy * dy
+            if distance < bestDistance {
+                bestDistance = distance
+                best = index
+            }
+        }
+        return best
+    }
+
+    func pickFace(at point: CGPoint) {
+        guard let index = faceIndex(at: point) else {
+            status = "[no_landmarks] 这张图上没有可选的脸"
+            facePickingMode = false
+            return
+        }
+        faceSelection = index
+        facePickingMode = false
+        status = "已选中第 \(index + 1) 张脸（共 \(faceCount) 张）"
     }
 
     /// 清掉某一类笔迹。不是撤销：撤销只退一步，而"把液化全擦了但保留图章"

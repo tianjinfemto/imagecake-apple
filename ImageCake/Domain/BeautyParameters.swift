@@ -105,6 +105,36 @@ public struct BeautyParameters: Equatable, Sendable {
         Swift.min(Swift.max(value, -100), 100) / 100
     }
 
+    /// 逐脸力度的作用域：**只缩放靠关键点定位的那两组**——五官区域美化（七项）
+    /// 与五官形变（六项）。不动皮肤组与身形组：
+    ///   · 皮肤磨皮/美白是整片皮肤一个掩码，逐张脸拆不开（拆了会在脸与脸之间
+    ///     出现质感不一致，比力度相同更难看得出）；
+    ///   · 身形项靠的是身体关节点，不属于任何一张脸。
+    ///
+    /// 返回新值而不是就地改：这个函数在渲染链里按脸循环调用，拿一份改过的副本
+    /// 比在循环里改 `inout` 参数更难写错。
+    public func scaled(by k: Double) -> BeautyParameters {
+        guard k != 1 else { return self }
+        var out = self
+        func scale(_ value: Double, _ range: ClosedRange<Double>) -> Double {
+            (value * k).clamped(to: range)
+        }
+        out.eyeBright = scale(eyeBright, 0 ... 100)
+        out.teethWhiten = scale(teethWhiten, 0 ... 100)
+        out.lipColor = scale(lipColor, 0 ... 100)
+        out.blush = scale(blush, 0 ... 100)
+        out.darkCircle = scale(darkCircle, 0 ... 100)
+        out.nasolabial = scale(nasolabial, 0 ... 100)
+        out.antiGlare = scale(antiGlare, 0 ... 100)
+        out.slimFace = scale(slimFace, -100 ... 100)
+        out.enlargeEyes = scale(enlargeEyes, -100 ... 100)
+        out.noseSlim = scale(noseSlim, -100 ... 100)
+        out.jawSlim = scale(jawSlim, -100 ... 100)
+        out.smileLift = scale(smileLift, -100 ... 100)
+        out.chinAdjust = scale(chinAdjust, -100 ... 100)
+        return out
+    }
+
     public mutating func clamp() {
         skinSmooth = skinSmooth.clamped(to: 0 ... 100)
         bodySmooth = bodySmooth.clamped(to: 0 ... 100)
@@ -132,6 +162,66 @@ public struct BeautyParameters: Equatable, Sendable {
         heighten = heighten.clamped(to: -100 ... 100)
         neckSlim = neckSlim.clamped(to: -100 ... 100)
         shoulderLift = shoulderLift.clamped(to: -100 ... 100)
+    }
+}
+
+// MARK: - 逐脸力度（合影用）
+
+/// 合影里每张脸一份力度缩放。按 `faceGeometries` 的**位置**对应（脸数按面积从大到小排序，
+/// 所以下标稳定），值含义：
+///
+///   · 100 = 跟随全局（出厂）；0 = 这张脸完全不动；可以拉到 200 让某张脸比全局更强。
+///   · **数组比脸数短**：多出来的脸跟随全局；**比脸数长**：多出来的值被忽略。
+///     这两条都是故意的：换一张人更多的图不能 silently 把上一张的设定扫到不相干的人头上。
+///
+/// 为什么不做成"脸的身份证"（按关键点位置匹配）：关键点每次重测，浮点位置不会逐比特相等，
+/// 所谓身份只能是"按面积排下来的序号"——那就直说它是序号，不假装有更稳的身份。
+public struct FaceStrengthParameters: Equatable, Sendable {
+    /// 下标 = 第几张脸（面积从大到小），值 = 0…200 的百分比。空数组 = 全部跟随。
+    public var scales: [Double] = []
+
+    /// 单张脸最多放到全局的几倍。超过 2 倍的症状是脸变形到不像同一个人。
+    public static let maxPercent = 200.0
+
+    public init() {}
+
+    /// 不参与 `EditParameters.isNeutral`：它是**修正量**而不是效果——没有其他人脸项
+    /// 开着时它什么也不动，把它算进中性判定只会让渲染快路径白白多跑一整遍。
+    public var isNeutral: Bool { scales.isEmpty || scales.allSatisfy { $0 == 100 } }
+
+    /// 第 index 张脸的缩放因子。越界与未设都是 1.0（跟随全局）。
+    public func factor(for index: Int) -> Double {
+        guard scales.indices.contains(index) else { return 1 }
+        return Swift.max(0.0, Swift.min(Self.maxPercent, scales[index])) / 100
+    }
+
+    /// 设第 index 张脸的力度。不够长就补 100，而不是存个稀疏结构——
+    /// 补平之后数组就是"逐脸力度"的完整快照，往返与同步都不需要特殊处理。
+    public mutating func setFactor(_ percent: Double, for index: Int) {
+        guard index >= 0 else { return }
+        while scales.count <= index { scales.append(100) }
+        scales[index] = percent.clamped(to: 0 ... Self.maxPercent)
+    }
+
+    public mutating func clamp() {
+        scales = scales.map { $0.clamped(to: 0 ... Self.maxPercent) }
+        if scales.count > 64 { scales = Array(scales.prefix(64)) }   // 防有人往预设里塑上百万个值
+    }
+}
+
+extension FaceStrengthParameters: Codable {
+    enum CodingKeys: String, CodingKey { case scales }
+
+    public init(from decoder: Decoder) throws {
+        self.init()
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        scales = try c.decodeIfPresent([Double].self, forKey: .scales) ?? scales
+        clamp()
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(scales, forKey: .scales)
     }
 }
 

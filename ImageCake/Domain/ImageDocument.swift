@@ -314,7 +314,8 @@ struct ImageDocument: Sendable {
         // 五官区域美化（亮眼/牙齿/唇色/腮红/祛黑眼圈/法令纹）：逐张脸都做，
         // 一张关键点都给不出就整段跳过。
         if !params.beauty.isRegionNeutral {
-            display = RegionEnhance.apply(display, geometries: faceGeometries, beauty: params.beauty)
+            display = RegionEnhance.apply(display, geometries: faceGeometries, beauty: params.beauty,
+                                          faceStrength: params.faceStrength)
         }
 
         // 妆容模板：跟区域美化同一层、同一依赖（关键点），所以紧跟其后。
@@ -342,7 +343,8 @@ struct ImageDocument: Sendable {
             let protectionMask = brush.protectionMask(for: display.size)
             if !params.beauty.isShapeNeutral {
                 display = ShapeWarp.apply(display, faces: faceGeometries, body: bodyAnchors,
-                                          beauty: params.beauty, protection: protectionMask)
+                                          beauty: params.beauty, protection: protectionMask,
+                                          faceStrength: params.faceStrength)
             }
             if !brush.liquify.isEmpty {
                 display = LiquifyEngine.apply(display, strokes: brush.liquify, protection: protectionMask)
