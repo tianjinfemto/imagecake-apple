@@ -109,16 +109,36 @@
    （合影只动最大那张脸）。现在先取进局部变量再合并，并且有一条断言
    拿"两张脸的场"与"一张脸的场"逐像素作差，而不是只测第一张脸。
 
+第三批（妆容/头发/手部/衣物/天空/打光/慢门/联机）又掘出 5 个，其中第一个是**会崩的**：
+
+7. **`RegionRaster.subtract` 的 UInt8 减法溢出 trap**（Signal 5）：
+   `Swift.max(0, left[i] - right[i])` 两个操作数都是 UInt8，右值更大时**先 trap
+   再求值**，`max(0, …)` 拦不住任何事。羽化后的唇内几乎必然在若干像素上大于
+   唇环，所以 `lipWeights` 一被调用就崩 —— 唇色这个卖点从来没机会生效过。
+   改成先升 Int 再减。同一个文件里的牙齿美白也依赖这个函数，算是一案两害。
+8. **天空饱和上限 0.55 把真天判成"非天"**：晴天天蓝 (0.24,0.47,0.80) 在 sRGB
+   上 s = 0.70。防误判的主力从来不是饱和度，而是从顶边连通生长，所以饱和度
+   上限放到 0.92。这条是镜像脚本拓到的（断言自己也会红）。
+9. **`SkyParameters.isNeutral` 漏了 `lightMatch`**：`!enabled || strength == 0`
+   把"只借光不借天"（强度 0 + 光照匹配 100）当成整组关闭，拉光匹配完全没反应。
+10. **连拍队列拿已夹范围的值比上限**：`burst` 自己已经夹到 1…60，于是
+    `accepted < requested` 永远为假 —— 请求 999 张变成"默声拍 60 张"，正是本项目
+    最忌讳的静默降级。计划层改成比较未夹范围的 `requestedBurst`。
+11. **AVFoundation 快门回调名写错只得警告**：`capture(_:didFinishProcessing…)` 与
+    协议要求的 `photoOutput(_:didFinishProcessing…)` "nearly matches"，编译器只
+    给 warning 不给 error —— 症状是接得上、拍不出，最后只剩 `[camera_timeout]`。
+    协议方法名写错不报错，这一类只能靠真机或断言拦。
+
 ## 6. 本轮的验证到什么程度
 
 **没有本地工具链（开发在 Windows，编译只在 CI 的 macOS runner 上做）**，所以：
 
 | 手段 | 覆盖 |
 |---|---|
-| 新增离线断言（两轮累计 46 + 27 格） | 上一轮 46 格（皮肤色域/频率分离/对立色往返/.cube 全链路/镜头与颗粒/证件照/ParamSync/文档级接线）**+ 本轮 27 格**（`PixCakeParityTests`）：逐脸位移场与区域掩码（第二张脸真的动、单脸时另一张逐比特不变）、皮肤逐脸分层、黑眼圈/法令纹的位置派生与"只抬不压 / 只填细暗线不碰低频"、旋转椭圆盘逐字数值、直方图与 8bit 编码同口径（含越界值）、抽样步长、溢出叠层双色、拼图三种适配与满铺不露底色、`[collage_*]` 四套点名、sidecar 命名/重名冲突/坏文件拒收/未来版本拒收、素材库状态派生与筛选、`dark_circle`/`nasolabial` 预设往返与出厂为关 |
+| 新增离线断言（三轮累计 46 + 27 + 30 格） | 上一轮 46 格（皮肤色域/频率分离/对立色往返/.cube 全链路/镜头与颗粒/证件照/ParamSync/文档级接线）**+ 本轮 27 格**（`PixCakeParityTests`）：逐脸位移场与区域掩码（第二张脸真的动、单脸时另一张逐比特不变）、皮肤逐脸分层、黑眼圈/法令纹的位置派生与"只抬不压 / 只填细暗线不碰低频"、旋转椭圆盘逐字数值、直方图与 8bit 编码同口径（含越界值）、抽样步长、溢出叠层双色、拼图三种适配与满铺不露底色、`[collage_*]` 四套点名、sidecar 命名/重名冲突/坏文件拒收/未来版本拒收、素材库状态派生与筛选、`dark_circle`/`nasolabial` 预设往返与出厂为关；**第三批 30 格**（`SceneFeatureTests`）：眉带/上睑弧区域派生与唇色不崩、凸包与色域相与、二频段保布纹、天区连通与"整幅蓝判为墙"、光照匹配不改亮度、打光只加不减与两分辨率同力、堆栈同图恒等与找回平移、联机决策层 |
 | 文档级"缺件必须点名" | `[no_landmarks]` / `[no_pose]` / `[no_lut:名字]` / `[no_constraint]` / `[no_face_box]` / `[id_photo]` / `[id_photo_empty]` / `[clipping]` / `[out_of_range]` / `[collage]` / `[collage_short]` / `[collage_failed]` / `[collage_no_template]` / `[sidecar_conflict]` / `[no_scope]` 都有对应断言或报告落点 |
 | 镜像预验证 | 本轮无 Swift 工具链，因此把"下睑椭圆/法令纹带派生、黑眼圈亮度场、法令纹频率门限、旋转椭圆盘"逐行镜像到 Python 跑出实际数值，断言阈值与比较方向全按镜像结果回填（包括"中格 251 而不是 255"这类靠猜必错的数量） |
-| **真实回归进度** | 本轮已跑过五轮 macOS + iOS 双端全量：从"整个测试目标编不过"一路到 **231 格中 229 格绿**。最后两处（逐脸形变、旋转椭圆对称格）的修正在 `e5d94d0`，**尚未被 CI 验到**：紧接着的几次 run 在分配 runner 前就失败了（1–2 秒、零步骤），check-run 注释是 `The job was not started because recent account payments have failed or your spending limit needs to be increased` —— 账户额度/付款问题，不是代码问题（macOS 分钟按 5× 计入，本轮跑得太密）。额度恢复后重跑即可。 |
+| **真实回归进度** | 上一批的 231 格收尾修正 **已跟本批一起跑绿**：2026-11-01 `39d7f07`，macOS + iPhone 16 Pro 模拟器 + 未签名 ipa 三个 job 全绿，**274 格 / 0 failures**（本批从"一行没编译"到全绿共 8 次提交）。之前的账户额度/付款阻塞（`The job was not started because recent account payments have failed…`，macOS 分钟按 5× 计入）已恢复，不再阻塞。新阻塞时先用 `scripts/ci-rerun.ps1 <runId>`，看 `steps=0` 就是 runner 侧问题不是代码 |
 | **仍未做** | 本轮新代码的**主观效果**没有真机人眼验证；关键点索引表照 MediaPipe 478，**换网络需重映射**（`FaceGeometry.from` 会因数量校验失败返回 nil，不会静默错位）；逐脸不同力度、皮肤分割权重、妆容模板与平台缺口见上表与 §7 |
 
 ## 7. 下一步（按"补一层就能拿到最多价值"排序）

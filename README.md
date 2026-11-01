@@ -205,10 +205,11 @@ ImageCake/
 | 手段 | 覆盖 |
 |---|---|
 | 单元测试（274 格） | 曲线单调/恒等/坏输入回退；中性调色只做 sRGB 编码；+1EV 线性翻倍；色相旋转；**三区色轮只碰自己的亮度区、八分区 HSL 的相邻带权重分摊**；**色轮坐标几何**；**画布视口几何**；**降噪降方差且保边、锐化产生 overshoot 且不越界**；**补光只抬暗部、高光柔化只压高光**；**文件名模板**；**去色边**；**撤销栈**；**笔迹栅格化/液化/图章/保护笔刷**；**文档级渲染（笔刷接线 + 跳分辨率重放）**；RGBA8 往返；**PNG-16 与 TIFF-16 经 ImageIO 读回**；分块/外接框/羽化/补丁合成；预设往返/未知键/太新拒收/缺键落出厂；**皮肤色域与三层约束**；**磨皮降噪声方差但保纹理、掩码外逐比特不变**；**对立色往返恒等、匀肤色不改亮度、油光只压亮斑**；**478 点派生语义量**；**多边形/椭圆栅格**；**位移场单位换算与锚线守恒**；**增高时头与躯干逐比特不动**；**.cube 枚举顺序/三线性/1D 逐通道/坏表点名/序列化往返**；**内置风格确定性与抬黑**；**径向映射单调、颗粒可重复**；**证件照 mm→px/槽位不重叠/排版落点**；**ParamSync 只搬所选组**；**局部蒙版三形状**；**文档级：几何真生效、缺资产整段跳过并点名**；**逐脸美化：第二张脸真的动、只给一张脸时另一张逐比特不变**；**两个专项目：黑眼圈只抬不压、法令纹只填细暗线不碰低频阴影**；**直方图分箱与 8bit 编码同口径（含越界值）**；**旋转椭圆栅格逐字数值**；**拼图三种适配与满铺不露底色**；**sidecar 命名/重名冲突/坏文件与未来版本拒收**；**素材库状态派生与筛选**；**妆容模板（含眉带位置与“上粉不盖住唇纹”）**；**头发/手部/衣物三块的频段断言（软阈值保发丝、凸包与色域相与、二频段保布纹）**；**天空：不连顶边的同色区不换、整幅蓝判为墙、光照匹配不改动亮度**；**打光：只加不减、局部平坦区逐比特不动、两个分辨率力度一致**；**堆栈：同图恒等、找回平移、三种堆法**；**联机决策：选设备优先与回落点名、连拍上限、命名不撞名** |
-| **真实编译**（2026-10-30） | GitHub Actions macOS runner：`xcodebuild test` 在 macOS 上跑完 **113 格全绿**；同一批断言在 **iPhone 16 Pro 模拟器**上也跑完 **113 格 / 0 failed / 0 skipped**（宿主 App 被真实拉起），Xcode 16.4 + XcodeGen |
-| **上一批（逐脸/专项/直方图/拼图/素材库）的编译与回归** | 已跑五轮 macOS + iOS 模拟器双端全量：从"测试目标编不过"（Float/Double 混算、不存在的 `^+` 中缀、`Bool |=`、缺 `Identifiable`）一路修到 **231 格中 229 格绿**；同时抓出两个"参数在、区域在、就是静默没反应"的真缺陷（关键点多边形未乘画布尺寸→唇色/牙齿永远拿到空遮罩；`touched || applyFaceEdits(...)` 短路→逐脸美化实际只做了第一张脸）。最后两处修正已推但没被验到：之后的 run 在分配 runner 前就失败（零步骤），check-run 注释是账户额度/付款问题 |
-| **本批（妆容/头发/手部/衣物/天空/打光/慢门/联机）尚未编译** | 30 格新断言与 14 个新文件同样只经过人工逐文件 + Python 镜像核对（衣物频段、头发阈值、打光"只加不减与分辨率无关"的数值全部镜像跑过再写断言）。预期编译问题集中在类型标注与新 AVFoundation/Vision 签名上，不是算法 |
-| 尚未做 | **未在真机上跑过**（模拟器不是 iPad：触摸压感、Apple Pencil、真 GPU 路径、系统权限弹窗都模拟不了）。ORT 权重也没有在真机上跑过推导——CI 不下载 660MB 权重 |
+| **首次真实编译**（2026-10-30） | GitHub Actions macOS runner：`xcodebuild test` 在 macOS 上跑完 **113 格全绿**；同一批断言在 **iPhone 16 Pro 模拟器**上也跑完 **113 格 / 0 failed / 0 skipped**（宿主 App 被真实拉起），Xcode 16.4 + XcodeGen |
+| 镜像预验证（无本地工具链时的主力） | 本机没有 Swift 工具链（`swift`/`swiftc`/`xcodebuild` 均不存在），数值断言**先逐行镜像到 Python 跑出实际数值再回填**。本批靠它提前抓到天空饱和上限那条（镜像算出测试用的晴天天蓝 s=0.70 会被 0.55 拒掉），省下一轮只有 CI 能发现的红；但它**发现不了 UInt8 溢出 trap 与量纲混用**——那两类只有真编译器/真运行时会报，两边都要做 |
+| **上一批（逐脸/专项/直方图/拼图/素材库）的编译与回归** | 已跑五轮 macOS + iOS 模拟器双端全量：从"测试目标编不过"（Float/Double 混算、不存在的 `^+` 中缀、`Bool |=`、缺 `Identifiable`）一路修到 **231 格中 229 格绿**；同时抓出两个"参数在、区域在、就是静默没反应"的真缺陷（关键点多边形未乘画布尺寸→唇色/牙齿永远拿到空遮罩；`touched || applyFaceEdits(...)` 短路→逐脸美化实际只做了第一张脸）。最后两处修正连同本批代码已在下面那轮一起跑绿 |
+| **本批（妆容/头发/手部/衣物/天空/打光/慢门/联机）：已编译并全绿**（2026-11-01，`39d7f07`） | macOS + iPad 模拟器 + 未签名 ipa 三个 job 全绿，**274 格 / 0 failures**。这轮一共 8 次提交、每轮都是真编译/真跑测：编译错 5 类（数组括号错位、`pipelineWarnings` 里用裸参数名、`lockForConfiguration(nil)` 多传实参、guard 的 else 里再套 guard 会 fall-through、`.buttonStyle(cond ? .bordered : .borderedProminent)` 两个具体样式类型无法归一）。**真缺陷 5 个**：① `RegionRaster.subtract` 的 **UInt8 减法溢出 trap**（Signal 5，唇色一开就崩）；② 天空饱和上限 0.55 把真实蓝天判成"非天"；③ `SkyParameters.isNeutral` 漏了 `lightMatch`→"只借光不借天"整组被当关；④ 连拍队列拿已夹到 1…60 的值比上限→请求 999 张变成静默拍 60 张；⑤ AVFoundation 快门回调写成 `capture(...)` 只得警告不报错→接得上但永远等不到回片 |
+| 尚未做 | **未在真机上跑过**（模拟器不是 iPad：触摸压感、Apple Pencil、真 GPU 路径、系统权限弹窗都模拟不了；联机拍摄与手部检测**只能真机验**，CI 无相机、合成图喂不出 Vision 手部姿态）。ORT 权重也没有在真机上跑过推导——CI 不下载 660MB 权重 |
 
 > 真实编译累计暴露并修掉了 5 个问题，全是“没编译过就发现不了”的类型：
 > 缺 AppIcon 资产集（actool 直接 BUILD FAILED）、`TEST_HOST` 在 macOS 上解析成测试包
@@ -239,9 +240,23 @@ ImageCake/
 - 只在 **Test on iOS Simulator** 红、macOS 绿 → 问题在 `#if os(iOS)` 分支或 iOS 运行时（宿主 App 拉起、权限、主线程），不是算法；
 - 失败在运行阶段 → 把 `macos-test-results` / `ios-test-results` 里的 `.xcresult` 下载打开，断言名会直接指向几何/色彩/容器中的哪一条。
 
-CI 已跑通（首次全绿：run [40809005087](https://github.com/tianjinfemto/imagecake-apple/actions/runs/40809005087)）。
+CI 已跑通（首次全绿：run [40809005087](https://github.com/tianjinfemto/imagecake-apple/actions/runs/40809005087)；
+本批妆容/场景六项首次全绿：run [41272846815](https://github.com/tianjinfemto/imagecake-apple/actions/runs/41272846815)，`39d7f07`，274 格 / 0 failures）。
 `macos-test` 与 `ios-build` 并行，加了模拟器测试后一轮约 5 分钟（冷启动模拟器占大头）；
 失败时先看是哪一个 step 变红，再按上表分流。
+
+本地没有 Mac 时，修红靠这四个脚本（都在 `scripts/`，纯 ASCII 以避开 PowerShell 5.1 的编码坑）：
+
+| 脚本 | 用途 |
+|---|---|
+| `ci-status.ps1` | 列最近几次 run 的 sha / 状态 / 结论 |
+| `ci-wait.ps1 <分钟>` | 轮询最新 run 直到结束，按 job 打印结论 |
+| `ci-errors.ps1 [runId]` | **直接拉日志抽 `error:` 与失败用例**（日志 zip 里的目录名带 `·`，手拼路径很容易错，所以固化成脚本） |
+| `ci-rerun.ps1 <runId>` | 只重跑失败的 job（`rerun-failed-jobs`），不重新推一个 commit 浪费 macOS 分钟 |
+
+> `steps=0` 且 1–2 秒就判失败 → 不是代码，先查 `check-runs/{id}/annotations`。
+> 本项目实际踩过：原文是 `The job was not started because recent account payments
+> have failed or your spending limit needs to be increased`（macOS 分钟按 5× 计入套餐额度）。
 
 ---
 
