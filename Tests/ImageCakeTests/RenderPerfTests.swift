@@ -176,6 +176,8 @@ final class RenderPerfTests: XCTestCase {
         let sum = perf.names.reduce(0.0) { $0 + (perf.milliseconds(for: $1) ?? 0) }
         XCTAssertEqual(sum, perf.stageTotalMS, accuracy: 1e-9)
         XCTAssertGreaterThan(perf.stageTotalMS, 0, "总时长为 0 说明根本没在计时（可能优化后忘了开）")
+        XCTAssertTrue(perf.summary().contains(RenderPerf.buildConfig),
+                      "耗时行必须自带构建配置：不然 Debug 的数会被当成 shipped 性能读：\(perf.summary())")
     }
 
     func testExportReportCarriesPerfLine() async {

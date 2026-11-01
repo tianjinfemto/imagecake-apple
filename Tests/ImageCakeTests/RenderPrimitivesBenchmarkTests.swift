@@ -97,7 +97,10 @@ final class RenderPrimitivesBenchmarkTests: XCTestCase {
             ("colorStats", colorMatch),
         ]
         rows.sort { $0.1 > $1.1 }
-        print("=== 原语归因 \(size.width)×\(size.height)（\(size.pixelCount) 像素，共 \(rows.count) 项）===")
+        print("=== [\(RenderPerf.buildConfig)] 原语归因 \(size.width)×\(size.height)（\(size.pixelCount) 像素，共 \(rows.count) 项）===")
+        // 表里的 µs/px 只在当前构建配置内可比较。Debug 下数组越界检查占主导，
+        // 所以"内存访问模式优化无效"这类结论在 Debug 里量不出来 —— 已踩过一次
+        // （模糊核改行主序：数字没动，已回退）。要拿它做优化依据，跑 Release。
         for (name, ms) in rows {
             print(String(format: "  %-20@ %8.2f ms  %6.2f µs/px", name as NSString, ms, perPixel(ms)))
         }

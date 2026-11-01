@@ -93,11 +93,18 @@ final class RenderPerf: @unchecked Sendable {
         Array(samples.sorted { $0.ms > $1.ms }.prefix(max(0, n)))
     }
 
+    /// 构建配置标签。**任何一张计时表都必须带它**：同一堆代码在 Debug（`-Onone` +
+    /// 数组越界检查）与 Release 下可以差一个数量级 —— 这一点本仓已经亲自踩过：
+    /// 第一次 1024² 基线量到 81～85 秒，看着像"必须上 SIMD/GPU"，实际那个数
+    /// 是 CI 测试 jobs 默认的 Debug 构建，它描述的是开发模式而不是交付给用户的 App。
+    /// （当时据此改的模糊核行主序因量不出收益已回退。）
+    static var buildConfig: String { _isDebugAssertConfiguration() ? "DEBUG" : "RELEASE" }
+
     /// 给人看的一行。底栏、状态栏与导出报告共用这一份文案。
     func summary() -> String {
         guard enabled else { return "[perf_off] 未计时" }
         let top = slowest(3).map { String(format: "%@ %.1f", $0.name, $0.ms) }.joined(separator: " · ")
-        return String(format: "渲染 %.1fms / %d 段", stageTotalMS, stageCount)
+        return String(format: "[%@] 渲染 %.1fms / %d 段", Self.buildConfig, stageTotalMS, stageCount)
             + (top.isEmpty ? "" : " · 最慢 " + top)
     }
 }

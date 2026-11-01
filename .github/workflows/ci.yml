@@ -271,3 +271,63 @@ jobs:
             build/INSTALL.txt
           retention-days: 30
 
+  # ---------------------------------------------------------------------------
+  # Release 下的性能基线。**只在手动触发时跑**（workflow_dispatch）。
+  #
+  # 为什么要单独一个 job 而不塞进 macos-test：macOS 分钟按 5× 计入套餐额度，
+  # 而 Release 得重新构建整个 App；前面已经因为跑太密把额度打过一次。
+  #
+  # 为什么必须存在：本仓踩过一次—— macos-test 默认是 Debug（-Onone + 数组越界
+  # 检查），据此量到的 1024² 基线是 81～85 秒，看上去“非上 SIMD/GPU 不可”；
+  # 而当时据此做的模糊核改写因在 Debug 里量不出收益而回退 —— Debug 的数
+  # 本来就支撑不了关于内存访问模式与 SIMD 收益的任何结论。计时表得知道自己
+  # 是什么配置量出来的，这个 job 就是专门提供 Release 那一侧的数的。
+  macos-perf-release:
+    name: macOS · perf baseline (Release)
+    runs-on: macos-15
+    timeout-minutes: 45
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 16
+        run: |
+          set -euo pipefail
+          for v in 16.4 16.3 16.2 16.1 16.0; do
+            if [ -d "/Applications/Xcode_$v.app" ]; then
+              sudo xcode-select -s "/Applications/Xcode_$v.app"
+              break
+            fi
+          done
+          xcodebuild -version
+
+      - name: Install XcodeGen
+        run: |
+          set -euo pipefail
+          brew install xcodegen
+          xcodegen version
+
+      - name: Generate project
+        run: xcodegen generate
+
+      - name: Benchmarks (Release configuration)
+        run: |
+          set -o pipefail
+          mkdir -p build
+          xcodebuild \
+            -project ImageCake.xcodeproj \
+            -scheme ImageCake \
+            -destination 'platform=macOS' \
+            -configuration Release \
+            -derivedDataPath build/PerfDerived \
+            -only-testing:ImageCakeTests/RenderBenchmarkTests \
+            -only-testing:ImageCakeTests/RenderPrimitivesBenchmarkTests \
+            -only-testing:ImageCakeTests/RenderPerfTests \
+            test 2>&1 | tee build/perf-release.log
+
+      - name: Show the tables in the job log
+        # 基准的全部价值在于能被看见并拿去对比：数字埋在 xcresult 里等于没量。
+        if: always()
+        run: |
+          grep -E '(基准|归因|判定依据|µs/px| ms |Test Suite .Render)' build/perf-release.log || true
+

@@ -104,7 +104,11 @@ final class RenderBenchmarkTests: XCTestCase {
 
         // ① 打印分阶段表（CI 日志里累积对照）。
         let medianText = String(format: "%.1f", median)
-        print("=== 渲染基准 \(size.width)×\(size.height) · 中位 \(medianText)ms / 三次 \(totals.map { Int($0) }) ===")
+        print("=== [\(RenderPerf.buildConfig)] 渲染基准 \(size.width)×\(size.height) · 中位 \(medianText)ms / 三次 \(totals.map { Int($0) }) ===")
+        if RenderPerf.buildConfig == "DEBUG" {
+            print("   ↑ 这是 Debug 构建（-Onone + 数组越界检查）：它描述开发模式，不是交付给用户的 App。")
+            print("     拿它当“该不该上 SIMD/GPU”的依据会得出错结论；Release 的数走 perf job 或本地跑。")
+        }
         for sample in last.samples.sorted(by: { $0.ms > $1.ms }) {
             let share = median > 0 ? sample.ms / median * 100 : 0
             print(String(format: "  %8.2f ms  %5.1f%%  %@", sample.ms, share, sample.name))
