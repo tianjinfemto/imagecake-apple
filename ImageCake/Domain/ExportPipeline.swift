@@ -102,11 +102,12 @@ enum ExportPipeline {
         // 否则“预览里合影每张都磨了、导出只磨了最大那张”。
         working.faceGeometries = document.faceGeometries
         working.bodyAnchors = document.bodyAnchors
-        // 手、天空区域、导入的那张天都是同一类资产：不带过去就是
-        // "预览里手磨了、天换了，导出件里两者都没了"。
+        // 手、天空区域、导入的那张天、追色的样片都是同一类资产：不带过去就是
+        // "预览里手磨了、天换了、调性对上了，导出件里三者都没了"。
         working.handHulls = document.handHulls
         working.skyMask = document.skyMask
         working.skyPhoto = document.skyPhoto
+        working.colorReference = document.colorReference
         working.idPhotoSheet = document.idPhotoSheet
         working.collage = document.collage
         if working.patches.contains(where: { $0.reference != working.canvasSize }) {

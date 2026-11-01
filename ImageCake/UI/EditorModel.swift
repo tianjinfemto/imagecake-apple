@@ -27,6 +27,7 @@ final class EditorModel: ObservableObject {
         case sky
         case stacking
         case tethering
+        case colorRef
 
         var title: String {
             switch self {
@@ -44,6 +45,7 @@ final class EditorModel: ObservableObject {
             case .sky: return "正在找天空"
             case .stacking: return "正在堆栈多帧"
             case .tethering: return "正在等相机回片"
+            case .colorRef: return "正在读参考样片"
             }
         }
 
@@ -63,6 +65,7 @@ final class EditorModel: ObservableObject {
             case .sky: return "从画面顶边做连通生长：不连到顶边的蓝色（裙子、水洼）不会被当成天"
             case .stacking: return "需要同一机位的 2 张以上连拍；先做整数平移对齐，再按模式堆叠"
             case .tethering: return "相机 10 秒不回片会报错而不是一直转圈"
+            case .colorRef: return "只取那一张的三轴均值与标准差，不合成也不对齐"
             }
         }
     }
@@ -390,6 +393,16 @@ final class EditorModel: ObservableObject {
                 doc.params = file.params
                 restoredStatus = file.status
             }
+            // 参数里存的是资产**名字**，字节在本程序自己的 Documents 目录里。
+            // 开图时按名字把它们捞回来，否则症状是“重开这张图后换天/追色全没了，
+            // 但滑杆还在原位”——比压根没存过更难解释。读不到不报错，
+            // 交给 pipelineWarnings 点名（[no_sky:名] / [no_colorref:名]）。
+            doc.skyPhoto = doc.params.sky.sourceName.isEmpty
+                ? nil
+                : await SkyLibrary.load(name: doc.params.sky.sourceName, canvas: doc.canvasSize)
+            doc.colorReference = doc.params.colorMatch.sourceName.isEmpty
+                ? nil
+                : await ColorReferenceLibrary.load(name: doc.params.colorMatch.sourceName)
             document = doc
             // 换图：旧图的历史全部作废，防抖任务也要提掉（否则它会把新图
             // 的参数当作一次修改记进去）。
@@ -1137,6 +1150,65 @@ final class EditorModel: ObservableObject {
         } catch {
             alert = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
+    }
+
+    // MARK: - 追色（样片对齐）
+
+    /// 导入一张参考样片。名字进参数、字节进文档，与 `.cube` / 导入的天同一套处理。
+    ///
+    /// 导入即启用：点“选一张样片”的人是要拿它对调性，不是先把文件收进库。
+    /// 不想要了关开关就行，面板里也写了这一句，不让“自动帮我开了”变成意外。
+    func importColorReference(from url: URL) async {
+        guard document != nil else { return }
+        busy = .colorRef
+        defer { busy = nil }
+        do {
+            let name = try ColorReferenceLibrary.install(from: url)
+            guard let reference = await ColorReferenceLibrary.load(name: name) else {
+                alert = "[no_colorref:\(name)] 存下了但读不出来（格式不支持或文件坏了）"
+                return
+            }
+            mutateDocument { item in
+                item.colorReference = reference
+                item.params.colorMatch.sourceName = name
+                item.params.colorMatch.enabled = true
+                var deps = item.params.requires.filter { !$0.hasPrefix("colorref:") }
+                deps.append("colorref:\(name)")
+                item.params.requires = deps
+            }
+            // 状态里报“追了多远”而不是“导入成功”：拿当前预览的统计量
+            // 与样片对一次，用户当场就知道这张样片是不是他要的那张。
+            // `report` 只在这一刻算（一次渲染 + 两次 5 万点抽样），不在滑杆上算。
+            if let updated = document {
+                let display = await Task.detached(priority: .userInitiated) {
+                    updated.render(applyMask: false)
+                }.value
+                if let current = ColorTransfer.stats(display),
+                   let referenceStats = ColorTransfer.stats(reference) {
+                    status = ColorTransfer.report(current: current, reference: referenceStats,
+                                                  match: updated.params.colorMatch)
+                        + " · 样片 \(name)"
+                } else {
+                    status = "已导入样片：\(name)（读不到统计量，追色不会跑）"
+                }
+            }
+            await renderNow()
+        } catch {
+            alert = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    /// 清掉参考样片。顺手把开关关掉：留着 enabled 只会得到一个
+    /// `[no_colorref]` 的警告而不是任何效果。
+    func clearColorReference() {
+        mutateDocument { item in
+            item.colorReference = nil
+            item.params.colorMatch.sourceName = ""
+            item.params.colorMatch.enabled = false
+            item.params.requires.removeAll { $0.hasPrefix("colorref:") }
+        }
+        scheduleRender()
+        status = "已清除参考样片（追色已关）"
     }
 
     /// 多帧堆栈（AI 慢门）。取代之前的当前图：堆出来的就是一张新图，

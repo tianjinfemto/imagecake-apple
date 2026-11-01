@@ -298,6 +298,70 @@ extension LightParameters: Codable {
     }
 }
 
+// MARK: - 追色（样片对齐）
+
+/// 把本图的色彩统计量往参考图那一张靠。实现见 `ColorTransferEngine`。
+///
+/// 为什么单独一组而不是挂到滤镜下：滤镜是**固定映射**（.cube 表），追色是
+/// **从另一张图现场量出来的映射**。两者可以叠加但必须能分开开关：批量对齐调性
+/// 用追色，最后的个人风格用滤镜。它们的依赖也不同（前者要一张图，后者要一张表）。
+public struct ColorMatchParameters: Equatable, Sendable {
+    /// 总开关。关时整组恒等，而且强度拉满也不跑。
+    public var enabled: Bool = false
+    /// 参考（样片）的文件名。名字进参数、字节进文档，与 `.cube` / 导入的天
+    /// 同一套处理：预设里只存名字，换机器读不到时点名而不是默默落回无色。
+    public var sourceName: String = ""
+    /// 0…100 追多少。100 = 完全按参考图的均值/反差；0 = 逐比特本图。
+    public var strength: Double = 100
+    /// 亮度轴要不要追。关掉只追白平衡不追反差，适用于“样片只是色调对我
+    /// 但曝光是故意差的”（比如夜景样片对到日光客片）。
+    public var matchLuma: Bool = true
+    /// 皮肤保护：皮肤像素只吃一部分色度位移。默认开，因为默认使用场景是
+    /// 人像批量——把人脸追绿是最显眼的失败。
+    public var protectSkin: Bool = true
+
+    public init() {}
+
+    /// 强度 0 与开关关都算中性。`sourceName` 不参与中性判定：
+    /// “选了样片但没启用”应当被当成关（不报警），而“启用了但图不见了”
+    /// 才需要被 `pipelineWarnings` 点名。
+    public var isNeutral: Bool { !enabled || strength == 0 }
+
+    public mutating func clamp() {
+        strength = strength.clamped(to: 0 ... 100)
+    }
+}
+
+extension ColorMatchParameters: Codable {
+    enum CodingKeys: String, CodingKey {
+        case enabled
+        case sourceName = "source_name"
+        case strength
+        case matchLuma = "match_luma"
+        case protectSkin = "protect_skin"
+    }
+
+    public init(from decoder: Decoder) throws {
+        self.init()
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? enabled
+        sourceName = try c.decodeIfPresent(String.self, forKey: .sourceName) ?? sourceName
+        strength = try c.decodeIfPresent(Double.self, forKey: .strength) ?? strength
+        matchLuma = try c.decodeIfPresent(Bool.self, forKey: .matchLuma) ?? matchLuma
+        protectSkin = try c.decodeIfPresent(Bool.self, forKey: .protectSkin) ?? protectSkin
+        clamp()
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(enabled, forKey: .enabled)
+        try c.encode(sourceName, forKey: .sourceName)
+        try c.encode(strength, forKey: .strength)
+        try c.encode(matchLuma, forKey: .matchLuma)
+        try c.encode(protectSkin, forKey: .protectSkin)
+    }
+}
+
 // MARK: - hex 颜色工具
 
 /// 24bit hex ↔ 归一 RGB。妆容/天空的颜色落盘走 hex，因此这里的换算必须

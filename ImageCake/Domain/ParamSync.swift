@@ -109,13 +109,20 @@ enum ParamSync {
         if groups.contains(.style) {
             out.filter = source.filter
             out.lens = source.lens
+            // 追色跟滤镜同组，而且必须跟着同步：它的典型用法就是
+            // “一张样片 → 整批客片”。不同步等于这功能在批量场景里不存在。
+            // 参考图与液化不同：液化逐张是逐张的脸，样片则是一张固定的图，
+            // 全批用同一张才对得上。
+            out.colorMatch = source.colorMatch
             // 虚拟打光是"整张图的观感"，跟滤镜/镜头同组。换天空**不**同步：
             // 天空区域是逐张图算的资产，把 `sky.enabled` 抄给全批等于给每张
             // 室内照挂一张假天。要同步天得连区域一起同步，而区域不是参数。
             out.light = source.light
-            // requires 登记的是外部资产（.cube 表），跟着滤镜走。导入的天不跟着风格跑：
-            // 上面那段里 `out.sky` 故意为空，依赖也不能单独跟着风格走。
-            out.requires = source.requires.filter { $0.hasPrefix("lut:") }
+            // requires 登记的是外部资产（.cube 表 / 参考图），跟着滤镜与追色走。
+            // 导入的天不跟着风格跑：上面那段里 `out.sky` 故意为空，依赖也不能单独跟着风格走。
+            out.requires = source.requires.filter {
+                $0.hasPrefix("lut:") || $0.hasPrefix("colorref:")
+            }
         }
         if groups.contains(.background) {
             out.bgEnabled = source.bgEnabled

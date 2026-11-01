@@ -2,8 +2,8 @@ import CoreGraphics
 import SwiftUI
 import UniformTypeIdentifiers
 
-// 风格面板。四块：滤镜（内置风格 + 导入 .cube）、镜头校正、本地调节、场景
-// （换天空 / 虚拟打光 / 多帧堆栈）。
+// 风格面板。五块：滤镜（内置风格 + 导入 .cube）、追色（样片对齐）、镜头校正、
+// 本地调节、场景（换天空 / 虚拟打光 / 多帧堆栈）。
 //
 // 与「调色」面板的分工：调色面板是**逐通道数学**（曝光/曲线/HSL/色轮），
 // 这里三块都是"整张图的观感"或"按区域二次调"。像素蛋糕把 70+ 滤镜放在
@@ -26,6 +26,10 @@ struct StylePanel: View {
     var body: some View {
         VStack(spacing: 12) {
             filterSection
+            // 追色紧跟滤镜：两者都是"整张图的调性"，而且同属批量同步的
+            // .style 组。顺序上追色先跑（见 ImageDocument.render），所以面板
+            // 上也按这个顺序排：先对调性，后加风格。
+            ColorMatchPanel().environmentObject(model)
             lensSection
             localSection
             // 换天空 / 虚拟打光 / 多帧堆栈：同属"改画面里的光与背景"，

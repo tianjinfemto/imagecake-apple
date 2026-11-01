@@ -106,6 +106,11 @@ struct ImageDocument: Sendable {
     /// 只存名字在参数里，字节由编辑器读盘后放这里，预览与导出共用。
     var skyPhoto: DisplayImage? = nil
 
+    /// 追色用的那张样片（已转到显示码，尺寸就是它自己的尺寸）。
+    /// 与导入的天同一待遇：参数里只存名字，字节在这里，预览与导出共用。
+    /// 不参与重采样也不参与合成——只用于算三个统计量。
+    var colorReference: DisplayImage? = nil
+
     var canvasSize: PixelSize { linear.size }
     var hasPersonMask: Bool { personMask != nil }
 
@@ -132,6 +137,16 @@ struct ImageDocument: Sendable {
         let garment = params.garment
         let sky = params.sky
         let light = params.light
+        let colorMatch = params.colorMatch
+        // 追色要的不是区域也不是关键点，而是**另一张图**：进了本程序但读不出来
+        // （换机器、改名、删了）时必须说清楚，否则用户看到的是“滑杆拉满画面不动”。
+        if !colorMatch.isNeutral {
+            if colorMatch.sourceName.isEmpty {
+                notes.append("[no_colorref] 追色已启用但还没选参考样片")
+            } else if colorReference == nil {
+                notes.append("[no_colorref:\(colorMatch.sourceName)] 找不到那张参考样片，追色整段跳过")
+            }
+        }
         if !beauty.isRegionNeutral, faceGeometries.isEmpty {
             notes.append("[no_landmarks] 没检测人脸关键点：亮眼/牙齿/唇色/腮红/祛黑眼圈/法令纹未生效")
         }
@@ -234,6 +249,19 @@ struct ImageDocument: Sendable {
         }
 
         var display = ToneEngine.render(workingLinear, params: params)
+
+        // 追色：在全局调色之后、皮肤掩码与本地调节之前。位置是有理由的：
+        //   · 放在 ToneEngine 之后——追的是“已经按本张图调过一遍”的结果，
+        //     而不是把曝光也重新发明一遍；
+        //   · 放在皮肤掩码**之前**——后续的磨皮/美白/区域美化全部按色域判皮肤，
+        //     它们必须看“用户最终看到的那套色”。与滤镜那一层的选择不矛盾：
+        //     风格 LUT 会把整个色相分布推到非自然的位（皮肤椭圆门限在推之前才是调好的），
+        //     而追色的目标本身就是另一张**照片**，追完的色仍在自然皮肤区里。
+        //   · 参考图缺失时 `ColorTransfer.apply` 原样返回，缺件由
+        //     `pipelineWarnings` 点名，不拿“没变”当“做完了”。
+        if !params.colorMatch.isNeutral {
+            display = ColorTransfer.apply(display, reference: colorReference, match: params.colorMatch)
+        }
 
         // 本地调节：在全局调色之后、空间滤波之前。选区内再叠一层调色，
         // 选区外不动。复用笔迹底座做掩码，与保护笔刷同构。
