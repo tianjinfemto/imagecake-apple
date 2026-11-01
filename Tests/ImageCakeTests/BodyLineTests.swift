@@ -28,19 +28,36 @@ final class BodyLineTests: XCTestCase {
     }
 
     /// 中灰底（0.60）上画：一条 2px 宽的暗线、一块 20px 宽的暗斑、一条 2px 宽的亮线。
+    ///
+    /// 涂行时必须钉在画布内：上一版这里直接拿 10..80 写，结果在 40×40 的夹具上
+    /// **数组越界写**，CI 报的是 `Fatal error: Index out of range` 而不是断言失败。
+    /// 测试自己也会把宿主跑崩，这一类错不会给你可读的失败信息。
     private func fixture(_ size: PixelSize) -> [Float] {
         var pixels = greyField(size, 0.60)
         func paintRow(_ y: Int, _ from: Int, _ to: Int, _ v: Double) {
-            for x in from ..< to {
+            guard y >= 0, y < size.height else { return }
+            for x in max(0, from) ..< min(to, size.width) {
                 let o = (y * size.width + x) * 4
                 pixels[o] = Float(v); pixels[o + 1] = Float(v); pixels[o + 2] = Float(v)
             }
         }
-        paintRow(20, 10, 80, 0.30)                       // 细暗线
-        paintRow(21, 10, 80, 0.30)
-        for y in 40 ..< 60 { paintRow(y, 10, 40, 0.30) }  // 宽暗斑（低频阴影）
-        paintRow(75, 10, 80, 0.90)                       // 细亮线
+        let lineY = min(20, size.height - 12)
+        paintRow(lineY, 10, 80, 0.30)                       // 细暗线
+        paintRow(lineY + 1, 10, 80, 0.30)
+        let blobFrom = lineY + 8, blobTo = min(blobFrom + 20, size.height - 6)
+        if blobTo > blobFrom {
+            for y in blobFrom ..< blobTo { paintRow(y, 10, 40, 0.30) }   // 宽暗斑（低频阴影）
+        }
+        paintRow(size.height - 4, 10, 80, 0.90)              // 细亮线
         return pixels
+    }
+
+    /// 上面那张图的行布局（同一套夹具给两个尺寸的图用）。
+    private func layout(_ size: PixelSize) -> (line: Int, blobCentre: Int, bright: Int) {
+        let lineY = min(20, size.height - 12)
+        let blobFrom = lineY + 8
+        return (lineY, blobFrom + 10 < min(blobFrom + 20, size.height - 6) ? blobFrom + 10 : blobFrom,
+                size.height - 4)
     }
 
     // MARK: - 算子性质（方向与频宽）
@@ -51,20 +68,20 @@ final class BodyLineTests: XCTestCase {
         var after = before
         let weight = [Float](repeating: 1, count: size.pixelCount)
         RegionEnhance.thinDarkLinePass(&after, size: size, weight: weight, amount: 1.0)
-
-        let thin = 20 * size.width + 45
+    
+        let place = layout(size)
+        let thin = place.line * size.width + 45
         XCTAssertGreaterThan(luma(after, thin), luma(before, thin),
                              "2px 宽的暗线要被填起来，不然这个功能没有意义")
-
+    
         // 宽暗斑的中心：邻域本身就是暗的低频，不许被当成"纹"抹平。
-        let blob = 50 * size.width + 25
+        let blob = place.blobCentre * size.width + 25
         XCTAssertEqual(luma(after, blob), luma(before, blob), accuracy: 1e-6,
-                       "低频阴影不得被动：抹了就把人抹扁")
-
+                       "低频阴影不得被动：抹了就把人抹平到扁")
+    
         // 亮线一律不动（只填暗线，不压亮线）。
-        let bright = 75 * size.width + 45
-        XCTAssertEqual(luma(after, bright), luma(before, bright), accuracy: 1e-6,
-                       "亮线不是纹")
+        let bright = place.bright * size.width + 45
+        XCTAssertEqual(luma(after, bright), luma(before, bright), accuracy: 1e-6, "亮线不是纹")
     }
 
     func testThinDarkLineIsBitExactOutsideWeight() {
@@ -111,22 +128,42 @@ final class BodyLineTests: XCTestCase {
         XCTAssertFalse(brush.isEmpty, "细纹区要进 isEmpty，否则'没有笔迹'的快速路径会漏掉它")
     }
 
-    func testDocumentConsumesLineMaskAndNamesMissingRegion() {
+    func testDocumentConsumesLineMaskOnAPictureThatActuallyHasALine() {
         let size = PixelSize(width: 32, height: 32)
+        // 这份文档夹具本来是纯皮肤色，所以上一版"涂了渲染必须变"的期待错了：
+        // 图上没有细线时算子按设计什么也不动，那正是它该 behave 的样子。
+        // 这里把线性图换成"背底 + 两行暗线"，才拿得到真正的消费证据。
+        var linear = [Float](repeating: 0, count: size.pixelCount * 4)
+        for y in 0 ..< size.height {
+            for x in 0 ..< size.width {
+                let dark = y == 19 || y == 20
+                let v: Float = dark ? 0.02 : 0.35
+                let o = (y * size.width + x) * 4
+                linear[o] = v; linear[o + 1] = v; linear[o + 2] = v; linear[o + 3] = 1
+            }
+        }
         var document = PipelineWiringDocument.make(size: size) { params in
             params.bodyLine.deLine = 100
         }
+        document.linear = LinearImage(size: size, pixels: linear)
         XCTAssertTrue(document.pipelineWarnings.contains { $0.contains("[no_line_region]") },
                       "开了但没涂选区要点名，实际：\(document.pipelineWarnings)")
-        let baseline = PipelineWiringDocument.make(size: size)
-        XCTAssertEqual(document.render().pixels, baseline.render().pixels, "没涂时整段必须不跑")
+        let before = document.render().pixels
 
-        document.brush.lines = [BrushStroke(points: [CGPoint(x: 0.5, y: 0.6)],
+        // 涂在暗线所在的那一行上（半径 0.25 的圆盘盖住 x 8..24）。
+        document.brush.lines = [BrushStroke(points: [CGPoint(x: 0.5, y: 0.61)],
                                             radius: 0.25, hardness: 0.5)]
         XCTAssertFalse(document.pipelineWarnings.contains { $0.contains("[no_line_region]") },
                        "涂上了就不该再报，实际：\(document.pipelineWarnings)")
-        XCTAssertNotEqual(document.render().pixels, baseline.render().pixels,
-                          "涂上了渲染链必须真的消费这块选区")
+        let after = document.render().pixels
+        let onLine = 19 * size.width + 16
+        XCTAssertGreaterThan(Double(ColorMath.luma(after[onLine * 4], after[onLine * 4 + 1], after[onLine * 4 + 2])),
+                             Double(ColorMath.luma(before[onLine * 4], before[onLine * 4 + 1], before[onLine * 4 + 2])),
+                             "涂在细线上时渲染链必须真的把它填起来")
+        // 没涂到的那一行（图顶）逐比特不变：选区真的在限定作用范围。
+        let outside = 2 * size.width + 16
+        XCTAssertEqual(after[outside * 4], before[outside * 4], accuracy: 1e-6,
+                       "选区外的行不得被动")
     }
 
     // MARK: - 预设契约与同步
@@ -137,7 +174,9 @@ final class BodyLineTests: XCTestCase {
         let legacy = try JSONDecoder().decode(EditParameters.self,
                                               from: #"{"exposure":0.5}"#.data(using: .utf8)!)
         XCTAssertEqual(legacy.bodyLine.deLine, 0, accuracy: 1e-9, "旧预设没有这一组，落出厂（关）")
-        XCTAssertTrue(legacy.isNeutral)
+        XCTAssertTrue(legacy.bodyLine.isNeutral)
+        XCTAssertFalse(legacy.isNeutral, "上面那份 JSON 带了曝光 +0.5，整组当然不中性；"
+                       + "只看 bodyLine 自已在旧文件里是否为关才是本条要钉的")
 
         var params = EditParameters()
         params.bodyLine.deLine = 62
