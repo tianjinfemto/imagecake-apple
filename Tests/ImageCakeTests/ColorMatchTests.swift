@@ -61,8 +61,10 @@ final class ColorMatchTests: XCTestCase {
         // 上取整：样本数不能超过上限，否则"小图与全图口径不同"这条就白写了。
         let stride = ColorTransfer.sampleStride(for: ColorTransfer.maxSamples + 1)
         XCTAssertGreaterThanOrEqual(stride, 2)
-        // 步长不是 Range 的成员，要走 `Swift.stride(from:to:by:)`。
-        let taken = Swift.stride(from: 0, to: ColorTransfer.maxSamples + 1, by: stride).count
+        // 步长不是 Range 的成员；`Swift.stride` 返的是 Sequence而不是 Collection，
+        // 也没有 .count。直接算项数：向上取整的总数 / 步长。
+        let total = ColorTransfer.maxSamples + 1
+        let taken = (total + stride - 1) / stride
         XCTAssertLessThanOrEqual(taken, ColorTransfer.maxSamples)
     }
 
