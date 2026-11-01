@@ -98,18 +98,26 @@ enum MaskOps {
                 sum += src[y * width + min(max(inIndex, 0), width - 1)]
             }
         }
-        // 垂直
+        // 垂直 pass 走行主序（与 `ImageDocument.boxBlurRGBA` / `BeautyEngine.boxBlur1`
+        // 同一条改法）：每列维护一个窗口和，每个像素经历的加、减序列与原来的列主序
+        // 版本逐个相同，所以逐比特不变 —— 羽化后的掩码字节值有直接断言
+        // （中心 251 而不是 255、旋转椭圆的对称格），改舍入顺序会把它们红成莫名失败。
+        var colSums = [Float](repeating: 0, count: width)
         for x in 0 ..< width {
             var sum: Float = 0
             for y in -radius ... radius {
                 sum += tmp[min(max(y, 0), height - 1) * width + x]
             }
-            for y in 0 ..< height {
-                out[y * width + x] = sum / window
-                let outIndex = y - radius
-                let inIndex = y + radius + 1
-                sum -= tmp[min(max(outIndex, 0), height - 1) * width + x]
-                sum += tmp[min(max(inIndex, 0), height - 1) * width + x]
+            colSums[x] = sum
+        }
+        for y in 0 ..< height {
+            let row = y * width
+            let outRow = min(max(y - radius, 0), height - 1) * width
+            let inRow = min(max(y + radius + 1, 0), height - 1) * width
+            for x in 0 ..< width {
+                out[row + x] = colSums[x] / window
+                colSums[x] -= tmp[outRow + x]
+                colSums[x] += tmp[inRow + x]
             }
         }
         return out
