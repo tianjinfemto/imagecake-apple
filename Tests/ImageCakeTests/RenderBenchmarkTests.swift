@@ -18,9 +18,17 @@ import XCTest
 /// 阈值收紧的时机：等这台 runner 上的基线跑过几次、知道抖动范围之后，
 /// 在下一个提交里把它变成真正的性能守卫（这件事写在计划里，不假装已经做完）。
 final class RenderBenchmarkTests: XCTestCase {
-    /// 1024² 是"能看出算法量级"又不至于把测试跑爆的尺寸：4.2M 个子像素，
-    /// 每个 O(N) 阶段都要真的走一遍内存带宽。
-    private var size: PixelSize { PixelSize(width: 1024, height: 1024) }
+    /// 256²（16 万子像素）而不是更大的图：基准要跟每次 push 一起跑，尺寸大了
+    /// 就是每轮多花几分钟 CI。量级事故（嵌套循环、每页重建掩码）在这个尺寸上
+    /// 一样能抓到的，因为它改变的是斜率不是常数。
+    ///
+    /// 为什么不再拿 1024² 当默认基准：那一次实测（2026-11-01，run 41300357546）
+    /// 中位 **81～85 秒**/渲染，四次采样把测试单跑拖到 330 秒以上 ——
+    /// 那不是守卫，那是对 CI 分钟的自残。同一份数据已经记进
+    /// docs/pixcake-parity.md §7 作为 P1 性能工作的基线（慢的 8 个阶段全部
+    /// 共用同一个每遍新建 16MB 缓冲的模糊原语）；要重测大图，把下面这个
+    /// 临时改回 1024 并在本地跑，不要进 CI。
+    private var size: PixelSize { PixelSize(width: 256, height: 256) }
 
     private func makeHeavyDocument() -> ImageDocument {
         let style = FilterEngine.styles.first?.id ?? ""
@@ -112,9 +120,10 @@ final class RenderBenchmarkTests: XCTestCase {
             XCTAssertGreaterThan(ms ?? -1, 0, "阶段 \(name) 记录为 0 毫秒，说明计时没接上")
         }
 
-        // ③ 极宽的上限：只抓量级事故（意外嵌套循环、每次都重建掩码之类）。
+        // ③ 量级上限。基准值会在 CI 日志里逐次累积，知道抖动范围后再收紧；
+        // 现在留的是"一个数量级"的余量，防的是从百毫秒变成十秒那种事故。
         XCTAssertLessThan(median, 20_000,
-                          "1024² 一次渲染中位 \(median)ms：这个量级已经不是慢，而是嵌套循环或掩码重建的问题")
+                          "256² 一次渲染中位 \(median)ms：这个量级不可能是慢，而是嵌套循环或每页重建缓冲")
 
         // ④ 结构性检查：几何阶段不该是主要开销（它是恒等跳过的路径）。
         if let geometry = last.milliseconds(for: "geometry"), geometry > median * 0.5 {
