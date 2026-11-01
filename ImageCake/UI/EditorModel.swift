@@ -314,7 +314,12 @@ final class EditorModel: ObservableObject {
     /// 拍一或 N 张（连拍走 `TetherPlan.queue`）。每张落盘后更新缩略图，
     /// 第一拍（且开了"拍完进编辑"）直接进编辑器。
     func shootTetherBurst(to directory: URL?) async {
-        guard tetherConnected else { await connectTether(); guard tetherConnected else { return } }
+        // 没连上先连一次；连不上就直接退出（不写成 `guard … else { … guard … }`，
+        // 内层 guard 通过时外层 else 会 fall-through，编译不过）。
+        if !tetherConnected {
+            await connectTether()
+        }
+        guard tetherConnected else { return }
         busy = .tethering
         defer { busy = nil }
         let settings = tetherSettings
