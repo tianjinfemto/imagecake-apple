@@ -90,7 +90,8 @@ final class TetherCapture: NSObject, AVCapturePhotoCaptureDelegate {
         }
         if configuredID == deviceID, heldDevice != nil { return }
 
-        try match.lockForConfiguration(nil)
+        // `lockForConfiguration()` 不接受任何参数（不要给它 `nil`）。
+        try match.lockForConfiguration()
         session.beginConfiguration()
         session.sessionPreset = .photo
         if let old = deviceInput { session.removeInput(old) }

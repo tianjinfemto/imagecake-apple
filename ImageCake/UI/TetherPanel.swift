@@ -87,15 +87,19 @@ struct TetherPanel: View {
                 HStack(spacing: 8) {
                     Button("刷新列表") { Task { await model.refreshTetherDevices() } }
                         .buttonStyle(.bordered)
-                    Button(model.tetherConnected ? "断开" : "接上") {
-                        if model.tetherConnected {
-                            model.disconnectTether()
-                        } else {
-                            Task { await model.connectTether() }
-                        }
+                    // 样式不能写成 `? .bordered : .borderedProminent`：两个分支是两个不同的
+                    // 具体样式类型，SwiftUI 也没有类型擦除的 ButtonStyle 可用，
+                    // 编译器只会报 "ButtonStyle has no member bordered"。
+                    // 所以按状态分两个 Button，各自绑定一个固定样式。
+                    if model.tetherConnected {
+                        Button("断开", systemImage: "stop.circle") { model.disconnectTether() }
+                            .buttonStyle(.bordered)
+                            .tint(Tokens.accent)
+                    } else {
+                        Button("接上", systemImage: "cable.connector") { Task { await model.connectTether() } }
+                            .buttonStyle(.borderedProminent)
+                            .tint(Tokens.accent)
                     }
-                    .buttonStyle(model.tetherConnected ? .bordered : .borderedProminent)
-                    .tint(Tokens.accent)
                 }
                 .disabled(model.busy != nil)
             }
