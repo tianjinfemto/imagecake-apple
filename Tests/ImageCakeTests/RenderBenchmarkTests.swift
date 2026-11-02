@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 import XCTest
 
 @testable import ImageCake
@@ -28,7 +29,13 @@ final class RenderBenchmarkTests: XCTestCase {
     /// docs/pixcake-parity.md §7 作为 P1 性能工作的基线（慢的 8 个阶段全部
     /// 共用同一个每遍新建 16MB 缓冲的模糊原语）；要重测大图，把下面这个
     /// 临时改回 1024 并在本地跑，不要进 CI。
-    private var size: PixelSize { PixelSize(width: 256, height: 256) }
+    /// 基准尺寸：默认 256（Debug 作业里一次全效果渲染约 6 秒，常驻再大就是自残）。
+    /// Release 作业用 IMAGECAKE_BENCH_SIZE 传 1024，量到真实尺寸的数而不是外推。
+    private var size: PixelSize {
+        let raw = ProcessInfo.processInfo.environment["IMAGECAKE_BENCH_SIZE"]
+        let edge = Swift.min(Swift.max(Int(raw ?? "") ?? 256, 64), 2048)
+        return PixelSize(width: edge, height: edge)
+    }
 
     private func makeHeavyDocument() -> ImageDocument {
         let style = FilterEngine.styles.first?.id ?? ""

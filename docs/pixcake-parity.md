@@ -168,8 +168,11 @@
    所以第 2 步的正确做法是先让测量本身可信，这一步已经落地：
    ① 每张计时表与 `[perf]` 行都自带 `[DEBUG]` / `[RELEASE]` 标签
       （`RenderPerf.buildConfig`），并有断言钉住"少了标签就算测量无效"；
-   ② 新增 `macos-perf-release` job（只在 workflow_dispatch 时跑，因为 macOS 分钟
-      按 10× 折算额度）：Release 配置下只跑三个基准类并把表打印进 job 日志；
+   ② 新增 `macos-perf-release` job：Release 配置下只跑三个基准类并把表打印进日志。
+      门槛是"main 与手动触发跑、PR 不跑"（私有仓库时期为了省钱才 dispatch-only；
+      公开后标准 runner 免费，省下来的只是墙钟时间），并且通过
+      `IMAGECAKE_BENCH_SIZE=1024` 把基准尺寸提到真实尺寸 —— Release 下 1024² 是
+      秒级，不再需要用 256² 的数字去外推大图；
    ③ 一条**自证式**断言代替凭感觉的毫秒阈值：可分离滑窗模糊的耗时对半径应当近乎
       不敏感，所以"半径 8 倍 → 耗时 8 倍"直接判 O(N·r²) 回归（实测比值 1.11，
       通过 —— 也就是说"算法量级错了"这个猜测同样被否掉了）；

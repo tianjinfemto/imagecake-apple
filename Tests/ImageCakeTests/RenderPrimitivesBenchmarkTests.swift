@@ -1,5 +1,6 @@
 import CoreGraphics
 import Dispatch
+import Foundation
 import XCTest
 
 @testable import ImageCake
@@ -17,7 +18,13 @@ import XCTest
 /// （O(N·r²)），那时慢就不是"Swift 没上 SIMD"，而是算法量级错了 —— 这一条
 /// 不需要任何凭感觉的毫秒阈值就能成立。
 final class RenderPrimitivesBenchmarkTests: XCTestCase {
-    private var size: PixelSize { PixelSize(width: 256, height: 256) }
+    /// 基准尺寸：默认 256（Debug 作业里一次全效果渲染约 6 秒，常驻再大就是自残）。
+    /// Release 作业用 IMAGECAKE_BENCH_SIZE 传 1024，量到真实尺寸的数而不是外推。
+    private var size: PixelSize {
+        let raw = ProcessInfo.processInfo.environment["IMAGECAKE_BENCH_SIZE"]
+        let edge = Swift.min(Swift.max(Int(raw ?? "") ?? 256, 64), 2048)
+        return PixelSize(width: edge, height: edge)
+    }
 
     /// 中频棋盘：既有边缘（模糊/双边要真的算）又不是纯色（纯色会被短路掉）。
     private func sampleImage() -> DisplayImage {

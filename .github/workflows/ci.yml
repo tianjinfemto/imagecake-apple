@@ -6,7 +6,12 @@
 #   · ios-build：先构建 iOS Simulator 目标抓平台特有的编译错误
 #     （UIKit/AppKit 分支、Info.plist 键、SwiftUI 的 iOS-only API），
 #     再在同一个 job 里把同一批断言在模拟器上真跑一遍；
-#   · ios-unsigned-ipa：产出未签名 ipa 给侧载（只在 main / 手动触发时跑）。
+#   · ios-unsigned-ipa：产出未签名 ipa 给侧载（只在 main / 手动触发时跑）；
+#   · macos-perf-release：Release 配置只跑基准类，main / 手动触发跑，PR 不跑。
+#
+# 计费口径：私有仓库时标准托管 runner 走套餐额度、macOS 按 10× 折算（Free 计划
+# 2,000 分钟/月 = 200 分钟 macOS 机时）；公开仓库这些 runner 免费。所以下面各 job
+# 的触发门槛是为了省墙钟时间与并发位，不再是为了省钱。
 # iOS 要跑测试的理由不是"多一层保险"：`#if os(iOS)` 包住的代码
 # （PhotoLibraryWriter / 相册写回）在 macOS 上根本不存在，一行都没执行过。
 
@@ -272,10 +277,13 @@ jobs:
           retention-days: 30
 
   # ---------------------------------------------------------------------------
-  # Release 下的性能基线。**只在手动触发时跑**（workflow_dispatch）。
+  # Release 下的性能基线：push 到 main 与手动触发时跑，PR 不跑。
   #
-  # 为什么要单独一个 job 而不塞进 macos-test：私有仓库的 macOS 分钟按 10× 折算额度，
-  # 而 Release 得重新构建整个 App；前面已经因为跑太密把额度打过一次。
+  # 门槛为什么从"只手动触发"放宽到"main 也跑"：私有仓库时 macOS 分钟按 10× 折算，
+  # 一个 Release 全量构建真的花钱；公开后标准托管 runner 免费，于是剩下的唯一理由
+  # 是墙钟时间 —— PR 评审用不到基线，而 Release 要把整个 App 重编一遍，所以仍跳 PR。
+  # 同时把基准尺寸提到 1024（见 IMAGECAKE_BENCH_SIZE）：Release 下 256 一次 102ms，
+  # 1024 是秒级而不是分钟级，终于能拿**真实尺寸**的基线而不是缩略图外推。
   #
   # 为什么必须存在：本仓踩过一次—— macos-test 默认是 Debug（-Onone + 数组越界
   # 检查），据此量到的 1024² 基线是 81～85 秒，看上去“非上 SIMD/GPU 不可”；
@@ -286,7 +294,10 @@ jobs:
     name: macOS · perf baseline (Release)
     runs-on: macos-15
     timeout-minutes: 45
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name != 'pull_request'
+    env:
+      # 测试读这个变量决定尺寸；Debug 作业不传，就用默认的 256。
+      IMAGECAKE_BENCH_SIZE: '1024'
     steps:
       - uses: actions/checkout@v4
 
