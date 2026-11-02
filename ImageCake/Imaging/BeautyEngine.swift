@@ -225,44 +225,63 @@ enum BeautyEngine {
 
     /// 单通道三次盒式模糊（近似高斯）。局部色度均值用它：
     /// 半径 = 长边/16 时，窗口比脸上的斑痘大一个量级，才能当"该区域的肤色"。
+    ///
+    /// 缓冲复用 + 按行/按列并行，与 `ImageDocument.blurred` 同一条改法：每个输出的
+    /// 算术序列与串行版完全相同（递推不裁起点，只把行/列分给不同线程），所以逐比特不变。
     static func blurredChannel(_ values: [Float], size: PixelSize, radius: Int) -> [Float] {
         guard radius > 0, size.pixelCount > 0, values.count == size.pixelCount else { return values }
-        var buffer = values
-        for _ in 0 ..< 3 {
-            buffer = boxBlur1(buffer, size: size, radius: radius)
+        let count = values.count
+        let scratch = UnsafeMutablePointer<Float>.allocate(capacity: count)
+        let even = UnsafeMutablePointer<Float>.allocate(capacity: count)
+        let odd = UnsafeMutablePointer<Float>.allocate(capacity: count)
+        defer { scratch.deallocate(); even.deallocate(); odd.deallocate() }
+
+        values.withUnsafeBufferPointer { src in
+            boxBlur1(src: src.baseAddress!, size: size, radius: radius, tmp: scratch, out: even)
+            boxBlur1(src: even, size: size, radius: radius, tmp: scratch, out: odd)
+            boxBlur1(src: odd, size: size, radius: radius, tmp: scratch, out: even)
         }
-        return buffer
+        return [Float](UnsafeBufferPointer(start: even, count: count))
     }
 
-    private static func boxBlur1(_ src: [Float], size: PixelSize, radius: Int) -> [Float] {
+    private static func boxBlur1(src: UnsafePointer<Float>, size: PixelSize, radius: Int,
+                                 tmp: UnsafeMutablePointer<Float>,
+                                 out: UnsafeMutablePointer<Float>) {
         let w = size.width
         let h = size.height
-        var tmp = [Float](repeating: 0, count: src.count)
-        var out = [Float](repeating: 0, count: src.count)
         let window = Float(radius * 2 + 1)
-        for y in 0 ..< h {
-            var sum: Float = 0
-            for x in -radius ... radius {
-                sum += src[y * w + Swift.min(Swift.max(x, 0), w - 1)]
-            }
-            for x in 0 ..< w {
-                tmp[y * w + x] = sum / window
-                sum -= src[y * w + Swift.min(Swift.max(x - radius, 0), w - 1)]
-                sum += src[y * w + Swift.min(Swift.max(x + radius + 1, 0), w - 1)]
-            }
-        }
-        for x in 0 ..< w {
-            var sum: Float = 0
-            for y in -radius ... radius {
-                sum += tmp[Swift.min(Swift.max(y, 0), h - 1) * w + x]
-            }
-            for y in 0 ..< h {
-                out[y * w + x] = sum / window
-                sum -= tmp[Swift.min(Swift.max(y - radius, 0), h - 1) * w + x]
-                sum += tmp[Swift.min(Swift.max(y + radius + 1, 0), h - 1) * w + x]
+        let bands = Swift.min(Swift.max(1, ProcessInfo.processInfo.activeProcessorCount), 16)
+
+        DispatchQueue.concurrentPerform(iterations: bands) { band in
+            let yStart = h * band / bands
+            let yEnd = h * (band + 1) / bands
+            for y in yStart ..< yEnd {
+                var sum: Float = 0
+                for x in -radius ... radius {
+                    sum += src[y * w + Swift.min(Swift.max(x, 0), w - 1)]
+                }
+                for x in 0 ..< w {
+                    tmp[y * w + x] = sum / window
+                    sum -= src[y * w + Swift.min(Swift.max(x - radius, 0), w - 1)]
+                    sum += src[y * w + Swift.min(Swift.max(x + radius + 1, 0), w - 1)]
+                }
             }
         }
-        return out
+        DispatchQueue.concurrentPerform(iterations: bands) { band in
+            let xStart = w * band / bands
+            let xEnd = w * (band + 1) / bands
+            for x in xStart ..< xEnd {
+                var sum: Float = 0
+                for y in -radius ... radius {
+                    sum += tmp[Swift.min(Swift.max(y, 0), h - 1) * w + x]
+                }
+                for y in 0 ..< h {
+                    out[y * w + x] = sum / window
+                    sum -= tmp[Swift.min(Swift.max(y - radius, 0), h - 1) * w + x]
+                    sum += tmp[Swift.min(Swift.max(y + radius + 1, 0), h - 1) * w + x]
+                }
+            }
+        }
     }
 
     /// 两层的逐像素取大（脸 ∨ 身）。用于"只要沾皮肤就生效"的算子。

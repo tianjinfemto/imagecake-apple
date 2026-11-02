@@ -512,49 +512,82 @@ struct ImageDocument: Sendable {
         return DisplayImage(size: canvas, pixels: out)
     }
 
-    /// 三次盒式模糊（近似高斯）。只在背景虚化上用，不需要频域精度。
+    /// 三次盒式模糊（近似高斯）。除了背景虚化，它还是衣物/细纹/手部/头发/区域美化
+    /// 那一族共用的低频参考：1024² Release 基线里六个热段合计占 71%，都压在这个函数上。
+    ///
+    /// 同时做了两件事，而且**每个输出的算术序列与朴素串行版完全相同**，所以逐比特不变：
+    /// ① 缓冲复用。原来每一遍都新建 `tmp` 与 `out` 并各自清零（1024² 一遍 32MB、三遍光
+    ///    写零就 96MB），现在只准备三个缓冲、不做初始化：两个 pass 都会把整幅写满，
+    ///    所以读到的永远是刚写过的值 —— 这里"不初始化"不是风险，而是省下那 96MB 的写。
+    /// ② 并行。水平 pass 的行与行、垂直 pass 的列与列之间互不相关（递推只在自己那一行/
+    ///    那一列内滑动，并且都从下标 0 起步），所以按行分带、按列分带既安全又确定。
+    ///    不能裁的是"起点"：跳过前缀会让累加器带着错的历史滑进来 —— 上一步就是这么被
+    ///    它自己的逐比特断言判红的（经 docs/pixcake-parity.md §7）。
     static func blurred(_ pixels: [Float], size: PixelSize, radius: Int) -> [Float] {
-        guard radius > 0, size.pixelCount > 0 else { return pixels }
-        var buffer = pixels
-        for _ in 0 ..< 3 {
-            buffer = boxBlurRGBA(buffer, size: size, radius: radius)
+        // 只要求"够大"，不要求"正好相等"：旧实现从不读 pixelCount*4 以后的位置，
+        // 用 == 会把偏大的缓冲变成静默原样返回 —— 那正是本项目反复踩过的失效形态。
+        guard radius > 0, size.pixelCount > 0, pixels.count >= size.pixelCount * 4 else {
+            return pixels
         }
-        return buffer
+        let count = size.pixelCount * 4   // 不是 pixels.count：写满的范围就是它
+        // 三个缓冲：一个水平中转 + 两个来回倒用输出。不初始化，因为都会被写满。
+        let scratch = UnsafeMutablePointer<Float>.allocate(capacity: count)
+        let even = UnsafeMutablePointer<Float>.allocate(capacity: count)
+        let odd = UnsafeMutablePointer<Float>.allocate(capacity: count)
+        defer { scratch.deallocate(); even.deallocate(); odd.deallocate() }
+
+        pixels.withUnsafeBufferPointer { src in
+            boxBlurRGBA(src: src.baseAddress!, size: size, radius: radius,
+                        tmp: scratch, out: even)
+            boxBlurRGBA(src: even, size: size, radius: radius, tmp: scratch, out: odd)
+            boxBlurRGBA(src: odd, size: size, radius: radius, tmp: scratch, out: even)
+        }
+        return [Float](UnsafeBufferPointer(start: even, count: count))
     }
 
-    private static func boxBlurRGBA(_ src: [Float], size: PixelSize, radius: Int) -> [Float] {
+    private static func boxBlurRGBA(src: UnsafePointer<Float>, size: PixelSize, radius: Int,
+                                    tmp: UnsafeMutablePointer<Float>,
+                                    out: UnsafeMutablePointer<Float>) {
         let w = size.width
         let h = size.height
-        var tmp = [Float](repeating: 0, count: src.count)
-        var out = [Float](repeating: 0, count: src.count)
         let window = Float(radius * 2 + 1)
+        let bands = Swift.min(Swift.max(1, ProcessInfo.processInfo.activeProcessorCount), 16)
 
-        for y in 0 ..< h {
-            for c in 0 ..< 4 {
-                var sum: Float = 0
-                for x in -radius ... radius {
-                    sum += src[(y * w + min(max(x, 0), w - 1)) * 4 + c]
-                }
-                for x in 0 ..< w {
-                    tmp[(y * w + x) * 4 + c] = sum / window
-                    sum -= src[(y * w + min(max(x - radius, 0), w - 1)) * 4 + c]
-                    sum += src[(y * w + min(max(x + radius + 1, 0), w - 1)) * 4 + c]
-                }
-            }
-        }
-        for x in 0 ..< w {
-            for c in 0 ..< 4 {
-                var sum: Float = 0
-                for y in -radius ... radius {
-                    sum += tmp[(min(max(y, 0), h - 1) * w + x) * 4 + c]
-                }
-                for y in 0 ..< h {
-                    out[(y * w + x) * 4 + c] = sum / window
-                    sum -= tmp[(min(max(y - radius, 0), h - 1) * w + x) * 4 + c]
-                    sum += tmp[(min(max(y + radius + 1, 0), h - 1) * w + x) * 4 + c]
+        // 水平：每个带只碰自己那几行
+        DispatchQueue.concurrentPerform(iterations: bands) { band in
+            let yStart = h * band / bands
+            let yEnd = h * (band + 1) / bands
+            for y in yStart ..< yEnd {
+                for c in 0 ..< 4 {
+                    var sum: Float = 0
+                    for x in -radius ... radius {
+                        sum += src[(y * w + min(max(x, 0), w - 1)) * 4 + c]
+                    }
+                    for x in 0 ..< w {
+                        tmp[(y * w + x) * 4 + c] = sum / window
+                        sum -= src[(y * w + min(max(x - radius, 0), w - 1)) * 4 + c]
+                        sum += src[(y * w + min(max(x + radius + 1, 0), w - 1)) * 4 + c]
+                    }
                 }
             }
         }
-        return out
+        // 垂直：每个带只碰自己那几列（两个 concurrentPerform 之间有同步屏障）
+        DispatchQueue.concurrentPerform(iterations: bands) { band in
+            let xStart = w * band / bands
+            let xEnd = w * (band + 1) / bands
+            for x in xStart ..< xEnd {
+                for c in 0 ..< 4 {
+                    var sum: Float = 0
+                    for y in -radius ... radius {
+                        sum += tmp[(min(max(y, 0), h - 1) * w + x) * 4 + c]
+                    }
+                    for y in 0 ..< h {
+                        out[(y * w + x) * 4 + c] = sum / window
+                        sum -= tmp[(min(max(y - radius, 0), h - 1) * w + x) * 4 + c]
+                        sum += tmp[(min(max(y + radius + 1, 0), h - 1) * w + x) * 4 + c]
+                    }
+                }
+            }
+        }
     }
 }
