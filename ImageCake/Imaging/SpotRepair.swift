@@ -46,26 +46,38 @@ enum SpotRepair {
             // 肤色像素一律不参与：脸、手、脖子都在同一档亮度里，只靠"暗"分不开。
             isSkin[i] = SkinMask.isSkin(r: Double(r), g: Double(g), b: Double(b))
         }
-        let radius = Swift.max(2, size.longEdge / 60)
-        let mean = BeautyEngine.blurredChannel(luma, size: size, radius: radius)
-        // 局部方差用同一套模糊算 E[x²] − E[x]²，不必另写一遍窗口。
+        // 平坦度与亮度差都必须看**环域**（挖掉中心的内外窗差）：含污点自己的窗口
+        // 会被污点本身括大方差 —— 镜像算过：3×3 的灰点在 5×5 窗内方差就飙到 0.037，
+        // 而细纹理夹具才 0.062，两者只差不到两倍，拿它当判据要么漏检要么误检。
+        // 环域下：灰点 ring_var≈0（深 0.40）、纹理 ring_var=0.0625（直接拒）、
+        // 干净背景深 0（不命中）。参数就是这么定下来的。
+        let r1 = Swift.max(2, size.longEdge / 40)
+        let r2 = Swift.max(r1 + 3, size.longEdge / 12)
+        let meanInner = BeautyEngine.blurredChannel(luma, size: size, radius: r1)
+        let meanOuter = BeautyEngine.blurredChannel(luma, size: size, radius: r2)
         var square = [Float](repeating: 0, count: count)
         for i in 0 ..< count { square[i] = luma[i] * luma[i] }
-        let meanSquare = BeautyEngine.blurredChannel(square, size: size, radius: radius)
+        let sqInner = BeautyEngine.blurredChannel(square, size: size, radius: r1)
+        let sqOuter = BeautyEngine.blurredChannel(square, size: size, radius: r2)
+        let n1 = Double((2 * r1 + 1) * (2 * r1 + 1))
+        let n2 = Double((2 * r2 + 1) * (2 * r2 + 1))
         let w = size.width
         let h = size.height
 
         var candidates: [(index: Int, depth: Double, spread: Double)] = []
-        for y in 1 ..< h - 1 {
-            for x in 1 ..< w - 1 {
+        // 内缩 r2：靠边那一圈的外窗会被复制像素污染，环域统计不再是真正的环均值。
+        guard w > 2 * r2 + 1, h > 2 * r2 + 1 else { return ([], ["[too_small]"]) }
+        for y in (r2 + 1) ..< (h - r2 - 1) {
+            for x in (r2 + 1) ..< (w - r2 - 1) {
                 let i = y * w + x
                 if isSkin[i] { continue }
-                let m = Double(mean[i])
-                let variance = Double(meanSquare[i] - m * m)
-                guard variance >= 0, variance < flatLimit else { continue }
-                let depth = m - Double(luma[i])
+                let ringMean = (Double(meanOuter[i]) * n2 - Double(meanInner[i]) * n1) / (n2 - n1)
+                let ringSquare = (Double(sqOuter[i]) * n2 - Double(sqInner[i]) * n1) / (n2 - n1)
+                let ringVariance = ringSquare - ringMean * ringMean
+                guard ringVariance >= 0, ringVariance < flatLimit else { continue }
+                let depth = ringMean - Double(luma[i])
                 guard depth > darkLimit else { continue }
-                candidates.append((i, depth, variance))
+                candidates.append((i, depth, ringVariance))
             }
         }
         guard !candidates.isEmpty else { return ([], ["[spot-repair:none]"]) }
