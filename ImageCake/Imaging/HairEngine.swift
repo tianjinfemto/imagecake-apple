@@ -163,9 +163,8 @@ enum HairEngine {
               pixels.count >= size.pixelCount * 4 else { return }
         let radius = Swift.max(2, Int(Double(size.longEdge) * 0.015))
         let luma = RegionEnhance.lumaChannel(pixels, size: size)
-        guard luma.count == size.pixelCount,
-              let ringRect = MaskOps.boundingRect(weights, size: size, padding: radius) else { return }
-        let base = BeautyEngine.blurredChannel(luma, size: size, radius: radius, in: ringRect)
+        guard luma.count == size.pixelCount else { return }
+        let base = BeautyEngine.blurredChannel(luma, size: size, radius: radius)
         for i in 0 ..< size.pixelCount {
             let w = Double(weights[i])
             // 三角窗环带。
@@ -192,9 +191,7 @@ enum HairEngine {
         guard amount > 0 else { return }
         // 低频参考：半径约为长边的 1.5%，比一根发丝的抖动宽、比一缕头发窄。
         let radius = Swift.max(2, Int(Double(size.longEdge) * 0.015))
-        // 发区以外不会被读到（下面的 `k > 0.001` 是门），所以模糊限定在发区矩形。
-        guard let hairRect = MaskOps.boundingRect(weights, size: size, padding: radius) else { return }
-        let base = ImageDocument.blurred(pixels, size: size, radius: radius, in: hairRect)
+        let base = ImageDocument.blurred(pixels, size: size, radius: radius)
         // 阈值（显示码）：0.02 ≈ 5 级灰阶。小于这个幅度的抖动就是毛躁。
         let threshold = 0.02
         for i in 0 ..< size.pixelCount {
@@ -222,8 +219,7 @@ enum HairEngine {
         guard amount != 0 else { return }
         let radius = Swift.max(2, Int(Double(size.longEdge) * 0.012))
         let luma = RegionEnhance.lumaChannel(pixels, size: size)
-        let low = BeautyEngine.blurredChannel(luma, size: size, radius: radius,
-                                              in: MaskOps.boundingRect(weights, size: size, padding: radius))
+        let low = BeautyEngine.blurredChannel(luma, size: size, radius: radius)
         for i in 0 ..< size.pixelCount {
             let k = abs(amount) * Double(weights[i])
             guard k > 0.001 else { continue }

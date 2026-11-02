@@ -225,54 +225,39 @@ enum BeautyEngine {
 
     /// 单通道三次盒式模糊（近似高斯）。局部色度均值用它：
     /// 半径 = 长边/16 时，窗口比脸上的斑痘大一个量级，才能当"该区域的肤色"。
-    ///
-    /// `in rect` 的语义与 `ImageDocument.blurred` 完全一样：只保证矩形内输出有效，
-    /// 且跳过的是整行/整列，行列内递推仍从 0 起步，所以矩形内的值与全幅版本逐比特相同。
-    static func blurredChannel(_ values: [Float], size: PixelSize, radius: Int,
-                               in rect: PixelRect? = nil) -> [Float] {
+    static func blurredChannel(_ values: [Float], size: PixelSize, radius: Int) -> [Float] {
         guard radius > 0, size.pixelCount > 0, values.count == size.pixelCount else { return values }
         var buffer = values
-        for pass in 0 ..< 3 {
-            // 与 `blurred` 同一条：前一遍矩形外留 0，所以除最后一遍都要多算一圈半径。
-            let window = rect.map { $0.grown(by: radius * (2 - pass), within: size) }
-            buffer = boxBlur1(buffer, size: size, radius: radius, in: window)
+        for _ in 0 ..< 3 {
+            buffer = boxBlur1(buffer, size: size, radius: radius)
         }
         return buffer
     }
 
-    private static func boxBlur1(_ src: [Float], size: PixelSize, radius: Int,
-                                 in rect: PixelRect?) -> [Float] {
+    private static func boxBlur1(_ src: [Float], size: PixelSize, radius: Int) -> [Float] {
         let w = size.width
         let h = size.height
         var tmp = [Float](repeating: 0, count: src.count)
         var out = [Float](repeating: 0, count: src.count)
         let window = Float(radius * 2 + 1)
-        let oy0 = rect?.y ?? 0
-        let oy1 = rect.map { Swift.min(h - 1, $0.maxY - 1) } ?? (h - 1)
-        let ox0 = rect?.x ?? 0
-        let ox1 = rect.map { Swift.min(w - 1, $0.maxX - 1) } ?? (w - 1)
-        guard oy0 <= oy1, ox0 <= ox1 else { return out }
-        let sy0 = Swift.max(0, oy0 - radius)
-        let sy1 = Swift.min(h - 1, oy1 + radius)
-        let sx1 = Swift.min(w - 1, ox1 + radius)
-        for y in sy0 ... sy1 {
+        for y in 0 ..< h {
             var sum: Float = 0
             for x in -radius ... radius {
                 sum += src[y * w + Swift.min(Swift.max(x, 0), w - 1)]
             }
-            for x in 0 ... sx1 {
+            for x in 0 ..< w {
                 tmp[y * w + x] = sum / window
                 sum -= src[y * w + Swift.min(Swift.max(x - radius, 0), w - 1)]
                 sum += src[y * w + Swift.min(Swift.max(x + radius + 1, 0), w - 1)]
             }
         }
-        for x in ox0 ... ox1 {
+        for x in 0 ..< w {
             var sum: Float = 0
             for y in -radius ... radius {
                 sum += tmp[Swift.min(Swift.max(y, 0), h - 1) * w + x]
             }
-            for y in 0 ... oy1 {
-                if y >= oy0 { out[y * w + x] = sum / window }
+            for y in 0 ..< h {
+                out[y * w + x] = sum / window
                 sum -= tmp[Swift.min(Swift.max(y - radius, 0), h - 1) * w + x]
                 sum += tmp[Swift.min(Swift.max(y + radius + 1, 0), h - 1) * w + x]
             }

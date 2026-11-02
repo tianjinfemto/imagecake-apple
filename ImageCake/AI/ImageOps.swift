@@ -5,29 +5,6 @@ import Foundation
 // 机器上被断言（imagecake 把 LaMa 的 tiling 抽出来测，是同一条理由）。
 
 enum MaskOps {
-    /// 浮点权重图的非零外接框，四周再外扩 `padding` 个像素（供模糊限定矩形用）。
-    /// 全零返回 nil 而不是 .zero：.zero 会被调用侧当成"算个空矩形"，
-    /// 而 nil 才能把"干脆没选区、整段不该跑"这件事传上去。
-    static func boundingRect(_ weights: [Float], size: PixelSize,
-                             padding: Int = 0) -> PixelRect? {
-        guard size.pixelCount > 0, weights.count == size.pixelCount else { return nil }
-        var minX = size.width, minY = size.height, maxX = -1, maxY = -1
-        for i in 0 ..< weights.count where weights[i] > 0 {
-            let x = i % size.width
-            let y = i / size.width
-            if x < minX { minX = x }
-            if x > maxX { maxX = x }
-            if y < minY { minY = y }
-            if y > maxY { maxY = y }
-        }
-        guard maxX >= minX, maxY >= minY else { return nil }
-        let x0 = Swift.max(0, minX - padding)
-        let y0 = Swift.max(0, minY - padding)
-        let x1 = Swift.min(size.width - 1, maxX + padding)
-        let y1 = Swift.min(size.height - 1, maxY + padding)
-        return PixelRect(x: x0, y: y0, width: x1 - x0 + 1, height: y1 - y0 + 1)
-    }
-
     /// 非零外接框（> threshold 才算遮罩）。空图/全零返回 .zero。
     static func boundingBox(_ mask: MaskBuffer, threshold: UInt8 = 128) -> PixelRect {
         guard !mask.isEmpty else { return .zero }

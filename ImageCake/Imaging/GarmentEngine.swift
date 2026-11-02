@@ -47,15 +47,8 @@ enum GarmentEngine {
         let longEdge = Double(size.longEdge)
         let baseRadius = Swift.max(1, Int(longEdge * baseRatio))
         let deepRadius = Swift.max(baseRadius + 1, Int(longEdge * deepRatio))
-        // 两段模糊都只在被涂到的那块上会被读到（下面 `k > 0.001` 就是门），
-        // 所以没理由在整幅上糊。Release 实测：选区光栅化 0.08ms vs 整幅模糊
-        // 7.74ms —— 这一步量不到收益就没资格说优化过。
-        // deep 是在 base 上再糊一次，它会读到选区外扩 deepRadius 处的 base，
-        // 所以 base 的矩形要比选区多出一个 deepRadius。
-        guard let baseRect = MaskOps.boundingRect(weights, size: size, padding: deepRadius),
-              let deepRect = MaskOps.boundingRect(weights, size: size) else { return }
-        let base = ImageDocument.blurred(pixels, size: size, radius: baseRadius, in: baseRect)
-        let deep = ImageDocument.blurred(base, size: size, radius: deepRadius, in: deepRect)
+        let base = ImageDocument.blurred(pixels, size: size, radius: baseRadius)
+        let deep = ImageDocument.blurred(base, size: size, radius: deepRadius)
         for i in 0 ..< size.pixelCount {
             let k = amount * Double(weights[i])
             guard k > 0.001 else { continue }
