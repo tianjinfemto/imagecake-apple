@@ -12,11 +12,14 @@ import XCTest
 /// 短路、结果都是原图，比较就成了自我安慰 —— 这个坑本仓踩过（平坦夹具上的空断言）。
 /// 尺寸也必须够大：小图走单线程分支，两边当然一样，但那没测到并行。
 ///
-/// 覆盖范围 = 当前真正接了 `PixelParallel` 的内核：降噪与锐化（`SpatialFilters`），
-/// 以及 `ab82107` 分带的六个逐像素热段（衣物祛褶 / 上粉 / 区域与细线 / 头发 / 手 / 皮肤掩码）。
-/// `BeautyEngine` 的三个 pass 一度也接上并被这条对照验证过，但整机渲染量不出收益
-/// （2367.6ms → 2411.7ms，+1.9%，在噪声内），已按"量不出收益就回退"撤掉；把它们
-/// 再放回来时应该同时补回对应的用例，而不是留一条"串行对串行"的空断言在这里冒充覆盖。
+/// 覆盖范围 = 当前真正接了 `PixelParallel` 的内核：降噪与锐化（`SpatialFilters`）、
+/// `ab82107` 分带的六个逐像素热段（衣物祛褶 / 上粉 / 区域与细线 / 头发 / 手 /
+/// 皮肤掩码），以及 `BeautyEngine` 的三个 pass（第二次接上）。
+///
+/// 为什么"加一个分带就得同时加一个 case"是硬规矩：生产代码分了带而对照被删掉,
+/// 就会出现本仓刚发生过的那种假话 —— 文件头声称已覆盖，实际那几个内核没人验。
+/// 第一次撤 `BeautyEngine` 的理由是"整机中位分辨不出"，而当时那把尺子本身比收益
+/// 更抖（跨跑 21%），所以换成 min-of-7 之后重做一次再判。
 final class ParallelVsSerialParityTests: XCTestCase {
     /// 必须同时满足 `pixelCount >= 4096` 与 `height >= 64`，否则并行分支根本没被走到。
     private let size = PixelSize(width: 131, height: 97)
@@ -139,6 +142,29 @@ final class ParallelVsSerialParityTests: XCTestCase {
             if bad.count < 5 { bad.append(i) }
         }
         XCTAssertTrue(bad.isEmpty, "\(label): \(bad.count)+ 个权重串并不一致，前几个下标 \(bad)")
+    }
+
+    /// 磨皮/祛瑕疵/匀肤色三个 pass（`BeautyEngine.apply` 的全部逐像素环）。
+    func testBeautyEnginePassesMatchSerial() {
+        let image = skinFixture()
+        let layers = SkinMask.build(image, personMask: MaskBuffer.filled(size, value: 255),
+                                    faceBoxes: [CGRect(x: 0.25, y: 0.2, width: 0.5, height: 0.6)])
+        // 夹具自检：掩码必须真的命中，否则两边都是"没皮肤可磨"，比的是空操作。
+        XCTAssertGreaterThan(SkinMask.weights(layers.face, size: size).filter { $0 > 0 }.count, 0,
+                             "夹具没让脸部皮肤掩码命中")
+        XCTAssertGreaterThan(SkinMask.weights(layers.body, size: size).filter { $0 > 0 }.count, 0,
+                             "夹具没让身体皮肤掩码命中")
+        var beauty = BeautyParameters()
+        beauty.skinSmooth = 60
+        beauty.bodySmooth = 40
+        beauty.blemish = 55
+        beauty.toneUnify = 45
+        beauty.redness = 35
+        beauty.deShine = 30
+        beauty.whitening = 40
+        assertSameBothWays("BeautyEngine.apply", input: image.pixels) {
+            BeautyEngine.apply(image, skin: layers, beauty: beauty).pixels
+        }
     }
 
     func testGarmentDeWrinkleMatchesSerial() {

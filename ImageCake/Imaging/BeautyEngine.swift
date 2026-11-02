@@ -63,19 +63,23 @@ enum BeautyEngine {
         // 梯度阈值按显示码：0.06 ≈ 15 级灰阶差/像素。
         let edgeThreshold = 0.06
 
-        for i in 0 ..< count {
+        // 二审：上一次也是分带，但判据用的是整机中位数（那台 runner 的抖动比这步
+        // 预期的收益大），所以"分辨不出来"不等于"没用"。这次用 min-of-7 与同一次最快
+        // 跑的分段毫秒数判定。算术前提没变：base/deep 已定型、gradient 只读、
+        // 写只落在自己那三个通道，所以每个像素的算术序列与串行完全相同。
+        PixelParallel.forEachPixel(&pixels, count) { buf, i in
             let amount = faceAmount * Double(face[i]) + bodyAmount * Double(body[i])
-            guard amount > 0.001 else { continue }
+            guard amount > 0.001 else { return }
             let o = i * 4
             let protect = 1 - Swift.min(1, gradient(base, size: size, at: i) / edgeThreshold)
             let k = Swift.min(1, amount) * protect
-            guard k > 0.001 else { continue }
+            guard k > 0.001 else { return }
             for c in 0 ..< 3 {
-                let source = Double(pixels[o + c])
+                let source = Double(buf[o + c])
                 let low = Double(base[o + c]) + (Double(deep[o + c]) - Double(base[o + c])) * baseMix
                 let detail = source - Double(base[o + c])
                 let target = low + detail * detailKeep
-                pixels[o + c] = Float(source + (target - source) * k)
+                buf[o + c] = Float(source + (target - source) * k)
             }
         }
     }
@@ -105,20 +109,20 @@ enum BeautyEngine {
         let count = size.pixelCount
         guard count > 0, amount > 0, base.count == pixels.count, skin.count == count else { return }
         let threshold = 0.16 - 0.11 * amount
-        for i in 0 ..< count {
+        PixelParallel.forEachPixel(&pixels, count) { buf, i in
             let weight = Double(skin[i]) * amount
-            guard weight > 0.001 else { continue }
+            guard weight > 0.001 else { return }
             let o = i * 4
             var difference: Double = 0
             for c in 0 ..< 3 {
-                difference += abs(Double(pixels[o + c]) - Double(base[o + c]))
+                difference += abs(Double(buf[o + c]) - Double(base[o + c]))
             }
             // 超出阈值多少，就填多少（软过渡，避免瑕疵边缘出现"补丁感"）。
             let fill = Swift.min(1, (difference - threshold * 3) / (threshold * 3))
-            guard fill > 0 else { continue }
+            guard fill > 0 else { return }
             for c in 0 ..< 3 {
-                let source = Double(pixels[o + c])
-                pixels[o + c] = Float(source + (Double(base[o + c]) - source) * fill * weight)
+                let source = Double(buf[o + c])
+                buf[o + c] = Float(source + (Double(base[o + c]) - source) * fill * weight)
             }
         }
     }
@@ -152,52 +156,54 @@ enum BeautyEngine {
         let shine = BeautyParameters.unit(beauty.deShine)
         let whitening = BeautyParameters.unit(beauty.whitening)
 
-        for i in 0 ..< count {
-            let weight = Swift.min(1, face[i] + body[i])
-            guard weight > 0.001 else { continue }
-            let l = Double(luma[i])
-            var lumaOut = l
-            var a = Double(chromaA[i])
-            var b = Double(chromaB[i])
-            let ma = Double(meanA[i])
-            let mb = Double(meanB[i])
-
-            if unify > 0 {
-                // 两路色度都往局部均值收：只收红绿轴会把"匀肤色"做成"偏品红"，
-                // 黄一块白一块依旧在。
-                let k = unify * Double(weight) * 0.85
-                a += (ma - a) * k
-                b += (mb - b) * k
-            }
-            if redness > 0, a > ma {
-                // 只收回"比局部更红"的那一半差值；偏绿的像素一律不动，
-                // 否则整张脸会往青里跑（祛红做成偏绿是这类算子的经典翻车）。
-                let k = redness * Double(weight) * 0.8
-                a -= (a - ma) * k
-            }
-            if shine > 0 {
-                let localSat = (ma * ma + mb * mb).squareRoot()
-                let sat = (a * a + b * b).squareRoot()
-                let flat = Swift.max(0, (l - 0.68) / 0.24)
-                if flat > 0 {
-                    // 油光 = 亮 + 色度比局部均值更淡。两个条件都成立才压。
-                    let deficit = localSat > 1e-4 ? Swift.min(1, Swift.max(0, (localSat - sat) / localSat) * 2) : 1
-                    let k = shine * Double(weight) * Swift.min(1, flat) * deficit
-                    lumaOut -= (lumaOut - 0.62) * 0.55 * k
-                    a += (ma - a) * Swift.min(1, k * 1.6)
+        // 构造 luma/chroma 那一环仍然串行：它要同时写三个数组，分带就得三层指针
+        // 嵌套。这一环是 tonePass 里真正贵的（每像素一次 fromOpponent），先只动它。
+        PixelParallel.forEachPixel(&pixels, count) { buf, i in
+                let weight = Swift.min(1, face[i] + body[i])
+                guard weight > 0.001 else { return }
+                let l = Double(luma[i])
+                var lumaOut = l
+                var a = Double(chromaA[i])
+                var b = Double(chromaB[i])
+                let ma = Double(meanA[i])
+                let mb = Double(meanB[i])
+    
+                if unify > 0 {
+                    // 两路色度都往局部均值收：只收红绿轴会把"匀肤色"做成"偏品红"，
+                    // 黄一块白一块依旧在。
+                    let k = unify * Double(weight) * 0.85
+                    a += (ma - a) * k
+                    b += (mb - b) * k
                 }
-            }
-            if whitening > 0 {
-                // 趋向白：L ← L + k·(1−L)。满力度也只抬 40%，且越亮抬得越少。
-                let k = whitening * Double(weight) * 0.4
-                lumaOut += (1 - lumaOut) * k
-            }
-
-            let rgb = BeautyEngine.fromOpponent(l: lumaOut, a: a, b: b)
-            let o = i * 4
-            pixels[o] = Float(Swift.min(Swift.max(rgb.r, 0), 1))
-            pixels[o + 1] = Float(Swift.min(Swift.max(rgb.g, 0), 1))
-            pixels[o + 2] = Float(Swift.min(Swift.max(rgb.b, 0), 1))
+                if redness > 0, a > ma {
+                    // 只收回"比局部更红"的那一半差值；偏绿的像素一律不动，
+                    // 否则整张脸会往青里跑（祛红做成偏绿是这类算子的经典翻车）。
+                    let k = redness * Double(weight) * 0.8
+                    a -= (a - ma) * k
+                }
+                if shine > 0 {
+                    let localSat = (ma * ma + mb * mb).squareRoot()
+                    let sat = (a * a + b * b).squareRoot()
+                    let flat = Swift.max(0, (l - 0.68) / 0.24)
+                    if flat > 0 {
+                        // 油光 = 亮 + 色度比局部均值更淡。两个条件都成立才压。
+                        let deficit = localSat > 1e-4 ? Swift.min(1, Swift.max(0, (localSat - sat) / localSat) * 2) : 1
+                        let k = shine * Double(weight) * Swift.min(1, flat) * deficit
+                        lumaOut -= (lumaOut - 0.62) * 0.55 * k
+                        a += (ma - a) * Swift.min(1, k * 1.6)
+                    }
+                }
+                if whitening > 0 {
+                    // 趋向白：L ← L + k·(1−L)。满力度也只抬 40%，且越亮抬得越少。
+                    let k = whitening * Double(weight) * 0.4
+                    lumaOut += (1 - lumaOut) * k
+                }
+    
+                let rgb = BeautyEngine.fromOpponent(l: lumaOut, a: a, b: b)
+                let o = i * 4
+                buf[o] = Float(Swift.min(Swift.max(rgb.r, 0), 1))
+                buf[o + 1] = Float(Swift.min(Swift.max(rgb.g, 0), 1))
+                buf[o + 2] = Float(Swift.min(Swift.max(rgb.b, 0), 1))
         }
     }
 
