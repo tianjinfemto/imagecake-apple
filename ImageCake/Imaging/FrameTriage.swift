@@ -37,13 +37,18 @@ enum FrameTriage {
         var keep: Bool
 
         /// 给人看的一行，进导出报告与状态栏。
+        ///
+        /// 分成几个显式 `String` 子表达式不是风格问题：写成一串 `+` 拼
+        /// `String(format:)` + `map` + `??` 时，类型推断会直接超时，报
+        /// "unable to type-check this expression in reasonable time"（本仓真红了一轮）。
         func summary() -> String {
-            String(format: "初筛 清晰%.2f 对比%.4f 曝光%.2f 截幅%.1f%%/%.1f%%",
-                   sharpness, contrast, exposure,
-                   clippedHighlights * 100, clippedShadows * 100)
-                + (eyeOpenness.map { String(format: " 眼开%.2f", $0) } ?? " 眼开无")
-                + (framingMargin.map { String(format: " 边距%.3f", $0) } ?? "")
-                + " · " + (tokens.isEmpty ? "[clean]" : tokens.joined(separator: " "))
+            let head = String(format: "初筛 清晰%.2f 对比%.4f 曝光%.2f 截幅%.1f%%/%.1f%%",
+                              sharpness, contrast, exposure,
+                              clippedHighlights * 100, clippedShadows * 100)
+            let eyes: String = eyeOpenness.map { String(format: " 眼开%.2f", $0) } ?? " 眼开无"
+            let margin: String = framingMargin.map { String(format: " 边距%.3f", $0) } ?? ""
+            let tag: String = tokens.isEmpty ? "[clean]" : tokens.joined(separator: " ")
+            return head + eyes + margin + " · " + tag
         }
     }
 
@@ -216,8 +221,11 @@ struct GeometryVerdict: Equatable, Sendable {
     var keep: Bool
 
     func summary() -> String {
-        (eyeOpenness.map { String(format: "眼开度 %.2f", $0) } ?? "眼开度 无关键点")
-            + (framingMargin.map { String(format: " · 最近边距 %.3f", $0) } ?? "")
-            + " · " + (tokens.isEmpty ? "[clean]" : tokens.joined(separator: " "))
+        // 同上：拆成显式子表达式，否则类型推断超时报错。
+        let eyes: String = eyeOpenness.map { String(format: "眼开度 %.2f", $0) }
+            ?? "眼开度 无关键点"
+        let margin: String = framingMargin.map { String(format: " · 最近边距 %.3f", $0) } ?? ""
+        let tag: String = tokens.isEmpty ? "[clean]" : tokens.joined(separator: " ")
+        return eyes + margin + " · " + tag
     }
 }
