@@ -51,6 +51,20 @@ struct ToolsPanel: View {
                 .foregroundStyle(Tokens.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
+            // 初筛读数：没检测过关键点时它自己会说 [no_landmarks]，
+            // 而不是显示一个看起来正常的默认值 —— 那是最容易骗人的地方。
+            Text(model.hasImage ? model.triageGeometryLine : "未打开照片，无从初筛")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(Tokens.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            // 初筛读数：没检测过关键点时它自己会说 [no_landmarks]，
+            // 而不是显示一个看起来正常的默认值 —— 那是最容易骗人的地方。
+            Text(model.hasImage ? model.triageGeometryLine : "未打开照片，无从初筛")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(Tokens.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
             Text("阶段之和不含阶段之间的调度空隙；导出报告里也有一行 [perf]，那里多带重绘/超清等 AI 阶段（导出耗时的头寸通常在那里）。")
                 .font(.system(size: 10))
                 .foregroundStyle(Tokens.textSecondary)
