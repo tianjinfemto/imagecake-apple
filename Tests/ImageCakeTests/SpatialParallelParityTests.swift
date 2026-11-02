@@ -128,7 +128,9 @@ final class SpatialParallelParityTests: XCTestCase {
             for x in 0 ..< size.width {
                 state = state &* 6364136223846793005 &+ 1442695040888963407
                 let o = (y * size.width + x) * 4
-                let edge = ((x / 9) + (y / 7)) % 2 == 0 ? 0.15 : 0.85
+                // edge 必须标注成 Float：写字面量会被推成 Double，和下面的 Float 相加
+                // 就编译不过（这一类错在 CI 上要看一轮才能发现）。
+                let edge: Float = ((x / 9) + (y / 7)) % 2 == 0 ? 0.15 : 0.85
                 let jitter = Float((state >> 35) % 100) / 1000
                 pixels[o] = edge + jitter
                 pixels[o + 1] = edge * 0.7 + jitter
