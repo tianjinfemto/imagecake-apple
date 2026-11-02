@@ -250,7 +250,7 @@ ImageCake/
 
 CI 已跑通（首次全绿：run [40809005087](https://github.com/tianjinfemto/imagecake-apple/actions/runs/40809005087)；
 本批妆容/场景六项首次全绿：run [41272846815](https://github.com/tianjinfemto/imagecake-apple/actions/runs/41272846815)，`39d7f07`，331 格 / 0 failures）。
-已验的 tip（性能两步做完、第三步撤完之后）CI **344 格 / 0 failures**（macOS 与 iPad 模拟器都是）；1024² Release 一次全效果渲染从 4832.6ms 降到 **2368~2872ms**（同一份代码两次跑差 21%，所以这个数只能写成区间，累计约 1.7~2.0×），明细与测量口径见 `docs/pixcake-parity.md` §7。
+已验的 tip（性能两步做完、第三步撤完之后）CI **344 格 / 0 failures**（macOS 与 iPad 模拟器都是）；1024² Release 一次全效果渲染 **最小 2425ms**（7 次取 min；改前只有 median-of-3 = 4832.6ms，两种口径不能直接相除，公平重测见 §7），明细与测量口径见 `docs/pixcake-parity.md` §7。
 实际落地的只有两处并行：**模糊核**（缓冲复用 + 按行/按列分带）与**双边降噪/高斯锐化**。把 `BeautyEngine` 三个 pass 也分带的那一步（`6e9b38b`）**已撤掉** —— 结果与串行逐比特相同，但整机 2367.6ms → 2411.7ms，落在共享 runner 的 ±10% 抖动里，量不出收益就不留在代码里。其余热段（妆容/区域/衣物/发/手）仍是逐像素串行，动它们之前要先解决测量口径：多次取 min、拿未改动的段当内部对照，否则真假分不出来。
 `macos-test` 与 `ios-build` 并行，加了模拟器测试后一轮约 5 分钟（冷启动模拟器占大头）；
 失败时先看是哪一个 step 变红，再按上表分流。

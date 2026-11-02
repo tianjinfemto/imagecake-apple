@@ -253,7 +253,15 @@
       ② 动其余热段之前，先把基准改成 **min-of-N（N ≥ 7）+ 同一次跑里拿未改动的段当对照**。
         剩下这些段想要的收益正好落在 10~20% 这一档，而当前口径的分辨率是 20%：不先修尺子,
         做任何一段的优化都会退化成"改了但说不清"。
-      **第三步（本轮，`PixelParallel.forEachPixel` + 六个引擎分带）—— 数字待 CI 量，本轮不宣称倍速**：
+
+      **新尺子的第一份数据（`81bf22c`，Release 1024²）**：`最慢/最快比 1.13× · 最小
+      2425.0ms · 中位 2586.2ms（7 次）`。同一份代码、同一次跑内只抖 13%，而两次跑之间
+      曾抖 21% —— 这就证实了 min-of-7 是比 median-of-3 稳得多的统计量，10~20% 这一档的
+      改动从此可测。Debug 侧同理（1.28× / 1.47×）。344 格 / 0 failures 在 macOS 与 iPad
+      模拟器上都成立，含新的抖动上限守卫。
+      还欠一步才算完整：要和"改前"公平比较，得用**同一把新尺子**重测优化前的构建
+      （`f256e43` 当时只有 median-of-3 = 4832.6ms），否则 2425 对 4832 混了两种统计口径。
+      这一步留给下一个性能提交顺手做（在旧 commit 的分支上 dispatch 一次 perf job）。      **第三步（本轮，`PixelParallel.forEachPixel` + 六个引擎分带）—— 数字待 CI 量，本轮不宣称倍速**：
       按上面那条判据逐个过了一遍，把仍是纯串行 `for i in 0 ..< count` 的热段全部改成分带：
       `GarmentEngine.deWrinkle`、`MakeupEngine.layDown`、`RegionEnhance` 的
       `darkCirclePass` / `antiGlarePass` / `thinDarkLinePass`（法令纹与颈纹/妊娠纹共用）/
