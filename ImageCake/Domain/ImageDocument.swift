@@ -512,44 +512,64 @@ struct ImageDocument: Sendable {
         return DisplayImage(size: canvas, pixels: out)
     }
 
-    /// 三次盒式模糊（近似高斯）。只在背景虚化上用，不需要频域精度。
-    static func blurred(_ pixels: [Float], size: PixelSize, radius: Int) -> [Float] {
+    /// 三次盒式模糊（近似高斯）。除背景虚化外，它还是衣物/细纹/手部/头发/区域美化
+    /// 那一族共用的低频参考：Release 原语表里单次 0.09~0.11 µs/px，是六个热段的共同底帐。
+    ///
+    /// `in rect` 只保证矩形内的输出有效（外面留 0）。各引擎都是先看权重再读模糊值，
+    /// 而权重矩形由调用侧按半径外扩过，所以这个约定能用。
+    /// 关键：跳过的是整行/整列，每条行、列内部的递推仍从 0 起步 ——
+    /// 矩形内每个像素经历的算术序列与全幅版本逐个相同，结果逐比特一致。
+    static func blurred(_ pixels: [Float], size: PixelSize, radius: Int,
+                        in rect: PixelRect? = nil) -> [Float] {
         guard radius > 0, size.pixelCount > 0 else { return pixels }
         var buffer = pixels
-        for _ in 0 ..< 3 {
-            buffer = boxBlurRGBA(buffer, size: size, radius: radius)
+        for pass in 0 ..< 3 {
+            // 除了最后一遍，前面都要多算一圈：半径 × 剩余遍数。
+            // 上一遍的矩形外是留 0 的，少算这一圈就会让最外沿几像素拿到错的窗口。
+            let window = rect.map { $0.grown(by: radius * (2 - pass), within: size) }
+            buffer = boxBlurRGBA(buffer, size: size, radius: radius, in: window)
         }
         return buffer
     }
 
-    private static func boxBlurRGBA(_ src: [Float], size: PixelSize, radius: Int) -> [Float] {
+    private static func boxBlurRGBA(_ src: [Float], size: PixelSize, radius: Int,
+                                     in rect: PixelRect?) -> [Float] {
         let w = size.width
         let h = size.height
         var tmp = [Float](repeating: 0, count: src.count)
         var out = [Float](repeating: 0, count: src.count)
         let window = Float(radius * 2 + 1)
+        // 输出范围与需要读的源范围（各多一个半径）。
+        let oy0 = rect?.y ?? 0
+        let oy1 = rect.map { Swift.min(h - 1, $0.maxY - 1) } ?? (h - 1)
+        let ox0 = rect?.x ?? 0
+        let ox1 = rect.map { Swift.min(w - 1, $0.maxX - 1) } ?? (w - 1)
+        guard oy0 <= oy1, ox0 <= ox1 else { return out }
+        let sy0 = Swift.max(0, oy0 - radius)
+        let sy1 = Swift.min(h - 1, oy1 + radius)
+        let sx1 = Swift.min(w - 1, ox1 + radius)
 
-        for y in 0 ..< h {
+        for y in sy0 ... sy1 {
             for c in 0 ..< 4 {
                 var sum: Float = 0
                 for x in -radius ... radius {
                     sum += src[(y * w + min(max(x, 0), w - 1)) * 4 + c]
                 }
-                for x in 0 ..< w {
+                for x in 0 ... sx1 {
                     tmp[(y * w + x) * 4 + c] = sum / window
                     sum -= src[(y * w + min(max(x - radius, 0), w - 1)) * 4 + c]
                     sum += src[(y * w + min(max(x + radius + 1, 0), w - 1)) * 4 + c]
                 }
             }
         }
-        for x in 0 ..< w {
+        for x in ox0 ... ox1 {
             for c in 0 ..< 4 {
                 var sum: Float = 0
                 for y in -radius ... radius {
                     sum += tmp[(min(max(y, 0), h - 1) * w + x) * 4 + c]
                 }
-                for y in 0 ..< h {
-                    out[(y * w + x) * 4 + c] = sum / window
+                for y in 0 ... oy1 {
+                    if y >= oy0 { out[(y * w + x) * 4 + c] = sum / window }
                     sum -= tmp[(min(max(y - radius, 0), h - 1) * w + x) * 4 + c]
                     sum += tmp[(min(max(y + radius + 1, 0), h - 1) * w + x) * 4 + c]
                 }

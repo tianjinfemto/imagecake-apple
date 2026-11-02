@@ -217,7 +217,10 @@ enum RegionEnhance {
         // 下比黑眼圈还窄，量到的参考值就是黑眼圈本身（症状：推满滑杆没反应）。
         let faceWidth = geometries.compactMap { $0.faceWidth > 0 ? $0.faceWidth : nil }.min() ?? 0.2
         let radius = Swift.max(6, Int(faceWidth * 0.35 * Double(size.width)))
-        let reference = BeautyEngine.blurredChannel(luma, size: size, radius: radius)
+        // 下面逐像素都先过 `w > 0.001`，所以参考场只需算到下睑矩形（多算一个半径）；
+        // 矩形外留 0 不会被读到。
+        guard let underEyeRect = MaskOps.boundingRect(weight, size: size, padding: radius) else { return }
+        let reference = BeautyEngine.blurredChannel(luma, size: size, radius: radius, in: underEyeRect)
 
         for i in 0 ..< size.pixelCount {
             let w = Double(weight[i]) * amount
@@ -265,8 +268,10 @@ enum RegionEnhance {
         for value in weight { maxWeight = Swift.max(maxWeight, value) }
         guard maxWeight > 0 else { return }
 
-        let low = ImageDocument.blurred(pixels, size: size,
-                                        radius: Swift.max(2, Int(Double(size.longEdge) * 0.012)))
+        let lowRadius = Swift.max(2, Int(Double(size.longEdge) * 0.012))
+        // 低频场同样只在选区内会被读到（下面的 `w > 0.001` 是门）。
+        guard let lineRect = MaskOps.boundingRect(weight, size: size, padding: lowRadius) else { return }
+        let low = ImageDocument.blurred(pixels, size: size, radius: lowRadius, in: lineRect)
         let threshold = 0.035 - 0.015 * amount
         for i in 0 ..< size.pixelCount {
             let w = Double(weight[i]) * amount
@@ -345,7 +350,8 @@ enum RegionEnhance {
         // 镜片周围的真实亮度而不是眩光自己）。
         let faceWidth = geometries.compactMap { $0.faceWidth > 0 ? $0.faceWidth : nil }.min() ?? 0.2
         let radius = Swift.max(4, Int(faceWidth * 0.30 * Double(size.width)))
-        let base = BeautyEngine.blurredChannel(luma, size: size, radius: radius)
+        guard let lensRect = MaskOps.boundingRect(weight, size: size, padding: radius) else { return }
+        let base = BeautyEngine.blurredChannel(luma, size: size, radius: radius, in: lensRect)
 
         for i in 0 ..< size.pixelCount {
             let w = Double(weight[i]) * amount

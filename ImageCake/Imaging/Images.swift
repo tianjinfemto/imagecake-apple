@@ -42,6 +42,18 @@ struct PixelRect: Hashable, Sendable {
     var minX: Int { x }
     var minY: Int { y }
 
+    /// 四周外扩 `pad` 个像素并夹回画布。限定范围的模糊需要它：
+    /// 上一遍的输出会喂给下一遍，所以除最后一遍外都要多算一圈半径，
+    /// 否则最外圈用的就是被裁掉的窗口，值会偏。
+    func grown(by pad: Int, within size: PixelSize) -> PixelRect {
+        let x0 = Swift.max(0, x - pad)
+        let y0 = Swift.max(0, y - pad)
+        let x1 = Swift.min(size.width - 1, maxX - 1 + pad)
+        let y1 = Swift.min(size.height - 1, maxY - 1 + pad)
+        guard x1 >= x0, y1 >= y0 else { return .zero }
+        return PixelRect(x: x0, y: y0, width: x1 - x0 + 1, height: y1 - y0 + 1)
+    }
+
     func intersected(with other: PixelRect) -> PixelRect {
         let x0 = max(x, other.x)
         let y0 = max(y, other.y)

@@ -171,8 +171,13 @@ enum HandEngine {
             chromaA[i] = Float(opp.a)
         }
         let radius = Swift.max(4, Int(Double(size.longEdge) * 0.03))
-        let meanL = BeautyEngine.blurredChannel(luma, size: size, radius: radius)
-        let meanA = BeautyEngine.blurredChannel(chromaA, size: size, radius: radius)
+        // 局部均值只会在 `weights > 0` 的像素上被读到（下面 `weight > 0.001` 就是门），
+        // 而且只读本像素的值不读邻域，所以限定在手部矩形上是安全的。
+        // （`smooth` 那一路没同此待遇：它的 `gradient(base,…)` 要读邻域，
+        // 限定矩形得连 `smoothPass` 一起改，下轮单独做并量数。）
+        let handRect = MaskOps.boundingRect(weights, size: size, padding: radius)
+        let meanL = BeautyEngine.blurredChannel(luma, size: size, radius: radius, in: handRect)
+        let meanA = BeautyEngine.blurredChannel(chromaA, size: size, radius: radius, in: handRect)
         let even = BeautyParameters.unit(hands.evenTone)
         let red = BeautyParameters.unit(hands.redness)
 
