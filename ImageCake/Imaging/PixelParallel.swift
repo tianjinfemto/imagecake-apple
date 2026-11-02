@@ -15,9 +15,17 @@ import Foundation
 ///    即使写的下标不相交也是未定义行为（数组不是线程安全的）。不相交的区间通过
 ///    同一个 `UnsafeMutableBufferPointer` 写才是本仓沿用的做法（同 `ToneEngine`）。
 enum PixelParallel {
+    /// 测试钩子：设成 1 就让所有分带退化成串行。生产路径永远不碰它。
+    ///
+    /// 为什么要有它：要证明“并行与串行逐比特相同”，最靠得住的做法不是在测试里
+    /// 手抄一份引擎实现（抄本会和真实代码漂移，最后变成两个都不对的东西在互相
+    /// 证明），而是让**同一份代码**分别走串行与并行两条分带。
+    static var forcedBands: Int?
+
     /// 分带数。上限 16 是为了避免在大小核机器上把小任务切成过多碎片。
     static var bands: Int {
-        Swift.min(Swift.max(1, ProcessInfo.processInfo.activeProcessorCount), 16)
+        if let forced = forcedBands { return Swift.max(1, forced) }
+        return Swift.min(Swift.max(1, ProcessInfo.processInfo.activeProcessorCount), 16)
     }
 
     /// 按像素数分带。小图直接单线程走完：开线程的固定开销会盖掉收益，
@@ -33,6 +41,24 @@ enum PixelParallel {
             let start = count * band / n
             let end = count * (band + 1) / n
             if end > start { body(start, end) }
+        }
+    }
+
+    /// 原地逐像素分带：`body` 拿到画布指针与自己那一个像素的下标。
+    ///
+    /// 为什么要包这一层而不是每个算子各写三层 `withUnsafe…BufferPointer`：
+    /// 这个形状（读自己那个像素 + 已定型的权重/低频场，写回同一下标）在渲染热段里
+    /// 出现了十几次好（好肤/区域/妆容/手/发/衣物）。手写时漏掉一层指针而直接下标
+    /// 改数组，症状不是编不过而是**偶发错值或崩溃**（多线程改同一个 Array 实例）。
+    /// 包起来之后“必须走指针”这件事只在一个地方负责，也只在一个地方审。
+    static func forEachPixel(_ pixels: inout [Float], _ count: Int,
+                             _ body: (UnsafeMutableBufferPointer<Float>, Int) -> Void) {
+        let needed = count * 4
+        guard count > 0, pixels.count >= needed else { return }
+        pixels.withUnsafeMutableBufferPointer { buf in
+            forEach(count) { start, end in
+                for i in start ..< end { body(buf, i) }
+            }
         }
     }
 
