@@ -264,7 +264,11 @@ CI 已跑通（首次全绿：run [40809005087](https://github.com/tianjinfemto/
 
 > `steps=0` 且 1–2 秒就判失败 → 不是代码，先查 `check-runs/{id}/annotations`。
 > 本项目实际踩过：原文是 `The job was not started because recent account payments
-> have failed or your spending limit needs to be increased`（macOS 分钟按 5× 计入套餐额度）。
+> have failed or your spending limit needs to be increased`。
+> 计费口径（已核 GitHub 官方文档）：仓库是 private 时，标准托管 runner 走套餐额度，
+> macOS 按 **10×** 折算 —— Free 计划 2,000 分钟/月只等于 200 分钟 macOS 机时，
+> 一轮全量回归约 10 分钟，所以每月只够约 20 轮；超出部分 $0.062/分钟。
+> **同一批标准 runner 在 public 仓库是免费的** —— 这是本项目最直接的解法。
 
 ### 推 CI 之前先跑本地那一套（不花分钟）
 
