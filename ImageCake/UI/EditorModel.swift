@@ -503,9 +503,6 @@ final class EditorModel: ObservableObject {
         FrameTriage.geometryReview(document?.faceGeometries.first).summary()
     }
 
-    /// 好片初筛的几何两轴（闭眼 / 构图）。只读已有关键点，不额外跑网络，
-    /// 所以它可以常显在面板里而不影响拖滑杆的手感。像素三轴在导出报告里。
-    var triageGeometryLine: String {
         FrameTriage.geometryReview(document?.faceGeometries.first).summary()
     }
 
