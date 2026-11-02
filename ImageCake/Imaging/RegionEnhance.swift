@@ -143,13 +143,21 @@ enum RegionEnhance {
         let region = RegionRaster.polygon(geometry.lipsInner, size: size,
                                           feather: Swift.max(1, size.longEdge / 300))
         var weight = SkinMask.weights(region, size: size)
-        for i in 0 ..< size.pixelCount {
-            guard weight[i] > 0 else { continue }
-            let o = i * 4
-            let opp = BeautyEngine.opponent(r: Double(pixels[o]), g: Double(pixels[o + 1]), b: Double(pixels[o + 2]))
-            let sat = (opp.a * opp.a + opp.b * opp.b).squareRoot()
-            let gate = Swift.min(1, Swift.max(0, (opp.l - 0.30) / 0.20)) * Swift.min(1, Swift.max(0, (0.42 - sat) / 0.18))
-            weight[i] *= Float(gate)
+        // 门是逐像素独立判定的（读自己那个像素、写自己那一个权重），
+        // 所以分带与串行逐比特相同。
+        weight.withUnsafeMutableBufferPointer { dst in
+            pixels.withUnsafeBufferPointer { src in
+                PixelParallel.forEach(size.pixelCount) { start, end in
+                    for i in start ..< end {
+                        guard dst[i] > 0 else { continue }
+                        let o = i * 4
+                        let opp = BeautyEngine.opponent(r: Double(src[o]), g: Double(src[o + 1]), b: Double(src[o + 2]))
+                        let sat = (opp.a * opp.a + opp.b * opp.b).squareRoot()
+                        let gate = Swift.min(1, Swift.max(0, (opp.l - 0.30) / 0.20)) * Swift.min(1, Swift.max(0, (0.42 - sat) / 0.18))
+                        dst[i] *= Float(gate)
+                    }
+                }
+            }
         }
         return weight
     }
@@ -219,18 +227,18 @@ enum RegionEnhance {
         let radius = Swift.max(6, Int(faceWidth * 0.35 * Double(size.width)))
         let reference = BeautyEngine.blurredChannel(luma, size: size, radius: radius)
 
-        for i in 0 ..< size.pixelCount {
+        PixelParallel.forEachPixel(&pixels, size.pixelCount) { buf, i in
             let w = Double(weight[i]) * amount
-            guard w > 0.001 else { continue }
+            guard w > 0.001 else { return }
             let o = i * 4
-            let l = Double(ColorMath.luma(pixels[o], pixels[o + 1], pixels[o + 2]))
-            guard l > 0.15 else { continue }
+            let l = Double(ColorMath.luma(buf[o], buf[o + 1], buf[o + 2]))
+            guard l > 0.15 else { return }
             let deficit = Double(reference[i]) - l
-            guard deficit > 0.012 else { continue }
+            guard deficit > 0.012 else { return }
             let soft = Swift.min(1.0, deficit / 0.22)
             let lift = deficit * 0.75 * w * soft
             for c in 0 ..< 3 {
-                pixels[o + c] = Float(Swift.min(1, Double(pixels[o + c]) + lift))
+                buf[o + c] = Float(Swift.min(1, Double(buf[o + c]) + lift))
             }
         }
     }
@@ -268,18 +276,20 @@ enum RegionEnhance {
         let low = ImageDocument.blurred(pixels, size: size,
                                         radius: Swift.max(2, Int(Double(size.longEdge) * 0.012)))
         let threshold = 0.035 - 0.015 * amount
-        for i in 0 ..< size.pixelCount {
+        PixelParallel.forEachPixel(&pixels, size.pixelCount) { buf, i in
+            // 这一环同时被祛法令纹与身体细纹（颈纹/妊娠纹）走，所以它是
+            // 这两段里唯一值得分带的全图遍历；上面的模糊已经并行过了。
             let w = Double(weight[i]) * amount
-            guard w > 0.001 else { continue }
+            guard w > 0.001 else { return }
             let o = i * 4
-            let l = Double(ColorMath.luma(pixels[o], pixels[o + 1], pixels[o + 2]))
+            let l = Double(ColorMath.luma(buf[o], buf[o + 1], buf[o + 2]))
             let refL = Double(ColorMath.luma(low[o], low[o + 1], low[o + 2]))
             let deficit = refL - l
-            guard deficit > threshold else { continue }
+            guard deficit > threshold else { return }
             let fill = Swift.min(1, (deficit - threshold) / (threshold * 4)) * w
             for c in 0 ..< 3 {
-                let source = Double(pixels[o + c])
-                pixels[o + c] = Float(source + (Double(low[o + c]) - source) * fill)
+                let source = Double(buf[o + c])
+                buf[o + c] = Float(source + (Double(low[o + c]) - source) * fill)
             }
         }
     }
@@ -347,22 +357,22 @@ enum RegionEnhance {
         let radius = Swift.max(4, Int(faceWidth * 0.30 * Double(size.width)))
         let base = BeautyEngine.blurredChannel(luma, size: size, radius: radius)
 
-        for i in 0 ..< size.pixelCount {
+        PixelParallel.forEachPixel(&pixels, size.pixelCount) { buf, i in
             let w = Double(weight[i]) * amount
-            guard w > 0.001 else { continue }
+            guard w > 0.001 else { return }
             let o = i * 4
-            let r = Double(pixels[o]), g = Double(pixels[o + 1]), b = Double(pixels[o + 2])
+            let r = Double(buf[o]), g = Double(buf[o + 1]), b = Double(buf[o + 2])
             let mx = Swift.max(r, Swift.max(g, b)), mn = Swift.min(r, Swift.min(g, b))
             let sat = mx <= 1e-6 ? 0.0 : (mx - mn) / mx
-            let l = Double(ColorMath.luma(pixels[o], pixels[o + 1], pixels[o + 2]))
-            guard l >= 0.45, sat <= 0.34 else { continue }
+            let l = Double(ColorMath.luma(buf[o], buf[o + 1], buf[o + 2]))
+            guard l >= 0.45, sat <= 0.34 else { return }
             let keepFloor = Double(base[i]) + 0.06
-            guard l > keepFloor else { continue }
+            guard l > keepFloor else { return }
             let soft = Swift.min(1.0, (l - keepFloor) / 0.12)
             let drop = (l - keepFloor) * 0.7 * w * soft
-            guard drop > 0 else { continue }
+            guard drop > 0 else { return }
             for c in 0 ..< 3 {
-                pixels[o + c] = Float(Swift.max(0, Double(pixels[o + c]) - drop))
+                buf[o + c] = Float(Swift.max(0, Double(buf[o + c]) - drop))
             }
         }
     }
@@ -405,9 +415,16 @@ enum RegionEnhance {
     static func lumaChannel(_ pixels: [Float], size: PixelSize) -> [Float] {
         guard size.pixelCount > 0, pixels.count >= size.pixelCount * 4 else { return [] }
         var out = [Float](repeating: 0, count: size.pixelCount)
-        for i in 0 ..< size.pixelCount {
-            let o = i * 4
-            out[i] = ColorMath.luma(pixels[o], pixels[o + 1], pixels[o + 2])
+        // 只读像素、只写自己那一个下标：分带与串行逐比特相同。
+        pixels.withUnsafeBufferPointer { src in
+            out.withUnsafeMutableBufferPointer { dst in
+                PixelParallel.forEach(size.pixelCount) { start, end in
+                    for i in start ..< end {
+                        let o = i * 4
+                        dst[i] = ColorMath.luma(src[o], src[o + 1], src[o + 2])
+                    }
+                }
+            }
         }
         return out
     }
@@ -421,18 +438,20 @@ enum RegionEnhance {
                        amount: Double, edit: (Double, Double, Double) -> (Double, Double, Double)) {
         let count = size.pixelCount
         guard count > 0, amount != 0, weight.count == count, pixels.count == count * 4 else { return }
-        for i in 0 ..< count {
+        // `edit` 在多个带上被并发调用：它必须是纯函数（不累计状态），
+        // 而本文件里传进来的五个全都是“读 (l,a,b) 返一个新三元组”。
+        PixelParallel.forEachPixel(&pixels, count) { buf, i in
             let k = amount * Double(weight[i])
-            guard k != 0 else { continue }
+            guard k != 0 else { return }
             let o = i * 4
-            let source = BeautyEngine.opponent(r: Double(pixels[o]), g: Double(pixels[o + 1]), b: Double(pixels[o + 2]))
+            let source = BeautyEngine.opponent(r: Double(buf[o]), g: Double(buf[o + 1]), b: Double(buf[o + 2]))
             let target = edit(source.l, source.a, source.b)
             let rgb = BeautyEngine.fromOpponent(l: source.l + (target.0 - source.l) * k,
                                                 a: source.a + (target.1 - source.a) * k,
                                                 b: source.b + (target.2 - source.b) * k)
-            pixels[o] = Float(Swift.min(Swift.max(rgb.r, 0), 1))
-            pixels[o + 1] = Float(Swift.min(Swift.max(rgb.g, 0), 1))
-            pixels[o + 2] = Float(Swift.min(Swift.max(rgb.b, 0), 1))
+            buf[o] = Float(Swift.min(Swift.max(rgb.r, 0), 1))
+            buf[o + 1] = Float(Swift.min(Swift.max(rgb.g, 0), 1))
+            buf[o + 2] = Float(Swift.min(Swift.max(rgb.b, 0), 1))
         }
     }
 }

@@ -53,24 +53,32 @@ enum HairMask {
         let ovalRight = faceBounds.maxX - faceBounds.width * 0.06
 
         var hits = [UInt8](repeating: 0, count: size.pixelCount)
+        // 按行分带：一个像素是不是头发只取决于它自己的坐标与颜色（加上已定型的
+        // α 字节），不读邻域也不累加 → 逐比特与串行相同。整幅扫一遍是 hairMask
+        // 段里最贵的一步，1024² 下能差出十几毫秒。
         image.pixels.withUnsafeBufferPointer { src in
-            for y in 0 ..< size.height {
-                let ny = Double(y) + 0.5
-                let normalizedY = ny / Double(size.height)
-                for x in 0 ..< size.width {
-                    let nx = (Double(x) + 0.5) / Double(size.width)
-                    guard nx >= box.minX, nx <= box.maxX,
-                          normalizedY >= box.minY, normalizedY <= box.maxY else { continue }
-                    let o = (y * size.width + x) * 4
-                    // 条件 1：不是皮肤。
-                    guard !SkinMask.isSkin(r: Double(src[o]), g: Double(src[o + 1]), b: Double(src[o + 2])) else { continue }
-                    // 条件 3：额头线以上，或脸轮廓的左右侧带。
-                    let inSideBand = (Double(x) < ovalLeft * Double(size.width))
-                        || (Double(x) > ovalRight * Double(size.width))
-                    guard normalizedY <= browLine || inSideBand else { continue }
-                    // 有人像 α 时按 α 相与：背景里那面暗墙不是头发。
-                    if let personBytes, personBytes[y * size.width + x] < 40 { continue }
-                    hits[y * size.width + x] = 255
+            hits.withUnsafeMutableBufferPointer { dst in
+                PixelParallel.forEachRow(size.height) { yStart, yEnd in
+                    for y in yStart ..< yEnd {
+                        let ny = Double(y) + 0.5
+                        let normalizedY = ny / Double(size.height)
+                        let row = y * size.width
+                        for x in 0 ..< size.width {
+                            let nx = (Double(x) + 0.5) / Double(size.width)
+                            guard nx >= box.minX, nx <= box.maxX,
+                                  normalizedY >= box.minY, normalizedY <= box.maxY else { continue }
+                            let o = (row + x) * 4
+                            // 条件 1：不是皮肤。
+                            guard !SkinMask.isSkin(r: Double(src[o]), g: Double(src[o + 1]), b: Double(src[o + 2])) else { continue }
+                            // 条件 3：额头线以上，或脸轮廓的左右侧带。
+                            let inSideBand = (Double(x) < ovalLeft * Double(size.width))
+                                || (Double(x) > ovalRight * Double(size.width))
+                            guard normalizedY <= browLine || inSideBand else { continue }
+                            // 有人像 α 时按 α 相与：背景里那面暗墙不是头发。
+                            if let personBytes, personBytes[row + x] < 40 { continue }
+                            dst[row + x] = 255
+                        }
+                    }
                 }
             }
         }
@@ -132,19 +140,19 @@ enum HairEngine {
         let (r, g, b) = HexColor.rgb(hex)
         let target = BeautyEngine.opponent(r: r, g: g, b: b)
         let maxShift = 0.22
-        for i in 0 ..< size.pixelCount {
+        PixelParallel.forEachPixel(&pixels, size.pixelCount) { buf, i in
             let w = Double(weights[i]) * amount
-            guard w > 0.001 else { continue }
+            guard w > 0.001 else { return }
             let o = i * 4
-            let source = BeautyEngine.opponent(r: Double(pixels[o]),
-                                               g: Double(pixels[o + 1]),
-                                               b: Double(pixels[o + 2]))
+            let source = BeautyEngine.opponent(r: Double(buf[o]),
+                                               g: Double(buf[o + 1]),
+                                               b: Double(buf[o + 2]))
             let da = Swift.min(maxShift, Swift.max(-maxShift, target.a - source.a)) * w
             let db = Swift.min(maxShift, Swift.max(-maxShift, target.b - source.b)) * w
             let rgb = BeautyEngine.fromOpponent(l: source.l, a: source.a + da, b: source.b + db)
-            pixels[o] = Float(Swift.min(Swift.max(rgb.r, 0), 1))
-            pixels[o + 1] = Float(Swift.min(Swift.max(rgb.g, 0), 1))
-            pixels[o + 2] = Float(Swift.min(Swift.max(rgb.b, 0), 1))
+            buf[o] = Float(Swift.min(Swift.max(rgb.r, 0), 1))
+            buf[o + 1] = Float(Swift.min(Swift.max(rgb.g, 0), 1))
+            buf[o + 2] = Float(Swift.min(Swift.max(rgb.b, 0), 1))
         }
     }
 
@@ -165,22 +173,22 @@ enum HairEngine {
         let luma = RegionEnhance.lumaChannel(pixels, size: size)
         guard luma.count == size.pixelCount else { return }
         let base = BeautyEngine.blurredChannel(luma, size: size, radius: radius)
-        for i in 0 ..< size.pixelCount {
+        PixelParallel.forEachPixel(&pixels, size.pixelCount) { buf, i in
             let w = Double(weights[i])
             // 三角窗环带。
             let band = Swift.max(0.0, 1.0 - abs(2.0 * w - 1.0) / 0.35)
             let k = band * amount
-            guard k > 0.001 else { continue }
+            guard k > 0.001 else { return }
             let o = i * 4
             let l = Double(luma[i])
             let refL = Double(base[i])
             let excess = l - refL
-            guard excess > 0.05 else { continue }        // 只处理亮于邻域的碎丝
+            guard excess > 0.05 else { return }        // 只处理亮于邻域的碎丝
             let soft = Swift.min(1.0, (excess - 0.05) / 0.12)
             let drop = (excess - 0.05) * 0.75 * k * soft
-            guard drop > 0 else { continue }
+            guard drop > 0 else { return }
             for c in 0 ..< 3 {
-                pixels[o + c] = Float(Swift.max(0, Double(pixels[o + c]) - drop))
+                buf[o + c] = Float(Swift.max(0, Double(buf[o + c]) - drop))
             }
         }
     }
@@ -194,19 +202,19 @@ enum HairEngine {
         let base = ImageDocument.blurred(pixels, size: size, radius: radius)
         // 阈值（显示码）：0.02 ≈ 5 级灰阶。小于这个幅度的抖动就是毛躁。
         let threshold = 0.02
-        for i in 0 ..< size.pixelCount {
+        PixelParallel.forEachPixel(&pixels, size.pixelCount) { buf, i in
             let k = amount * Double(weights[i])
-            guard k > 0.001 else { continue }
+            guard k > 0.001 else { return }
             let o = i * 4
             for c in 0 ..< 3 {
-                let source = Double(pixels[o + c])
+                let source = Double(buf[o + c])
                 let detail = source - Double(base[o + c])
                 let amplitude = abs(detail)
                 guard amplitude > 0 else { continue }
                 // 软阈值：超过阈值的部分原样保留，只削阈值以内的那一段。
                 let kept = amplitude <= threshold ? detail * (1 - k)
                     : detail - threshold * (1 - k) * (detail > 0 ? 1 : -1)
-                pixels[o + c] = Float(Swift.min(Swift.max(Double(base[o + c]) + kept, 0), 1))
+                buf[o + c] = Float(Swift.min(Swift.max(Double(base[o + c]) + kept, 0), 1))
             }
         }
     }
@@ -220,11 +228,11 @@ enum HairEngine {
         let radius = Swift.max(2, Int(Double(size.longEdge) * 0.012))
         let luma = RegionEnhance.lumaChannel(pixels, size: size)
         let low = BeautyEngine.blurredChannel(luma, size: size, radius: radius)
-        for i in 0 ..< size.pixelCount {
+        PixelParallel.forEachPixel(&pixels, size.pixelCount) { buf, i in
             let k = abs(amount) * Double(weights[i])
-            guard k > 0.001 else { continue }
+            guard k > 0.001 else { return }
             let l = Double(luma[i])
-            guard l > 0.45 else { continue }        // 只处理高光侧，暗部不参与
+            guard l > 0.45 else { return }        // 只处理高光侧，暗部不参与
             let o = i * 4
             // 高光的"软顶"：以 0.72 为膝点，roll-off 压掉过冲。
             let over = Swift.max(0, l - 0.72)
@@ -232,14 +240,14 @@ enum HairEngine {
                 // 压得多少只跟"超过膝点多少"有关，且带上限（不会把亮丝压成灰块）。
                 let press = k * 0.55 * over / Swift.max(over, 0.28)
                 for c in 0 ..< 3 {
-                    pixels[o + c] = Float(Swift.min(1, Swift.max(0, Double(pixels[o + c]) - press * (0.06 + over))))
+                    buf[o + c] = Float(Swift.min(1, Swift.max(0, Double(buf[o + c]) - press * (0.06 + over))))
                 }
             } else {
                 // 提亮量随"比局部均值亮多少"走：亮的地方更亮，平的地方不动，
                 // 所以不会把整片头发洗白。
                 let lift = k * 0.30 * Swift.max(0, l - Double(low[i]))
                 for c in 0 ..< 3 {
-                    pixels[o + c] = Float(Swift.min(1, Double(pixels[o + c]) + lift))
+                    buf[o + c] = Float(Swift.min(1, Double(buf[o + c]) + lift))
                 }
             }
         }
@@ -250,17 +258,17 @@ enum HairEngine {
     /// 只推色度（A/B 两轴按比例放大），亮度不动——"加深发色"不是"把头发变暗"。
     static func saturate(_ pixels: inout [Float], size: PixelSize, weights: [Float], amount: Double) {
         guard amount > 0 else { return }
-        for i in 0 ..< size.pixelCount {
+        PixelParallel.forEachPixel(&pixels, size.pixelCount) { buf, i in
             let k = amount * Double(weights[i])
-            guard k > 0.001 else { continue }
+            guard k > 0.001 else { return }
             let o = i * 4
-            let source = BeautyEngine.opponent(r: Double(pixels[o]), g: Double(pixels[o + 1]), b: Double(pixels[o + 2]))
+            let source = BeautyEngine.opponent(r: Double(buf[o]), g: Double(buf[o + 1]), b: Double(buf[o + 2]))
             let rgb = BeautyEngine.fromOpponent(l: source.l,
                                                 a: source.a * (1 + 0.45 * k),
                                                 b: source.b * (1 + 0.45 * k))
-            pixels[o] = Float(Swift.min(Swift.max(rgb.r, 0), 1))
-            pixels[o + 1] = Float(Swift.min(Swift.max(rgb.g, 0), 1))
-            pixels[o + 2] = Float(Swift.min(Swift.max(rgb.b, 0), 1))
+            buf[o] = Float(Swift.min(Swift.max(rgb.r, 0), 1))
+            buf[o + 1] = Float(Swift.min(Swift.max(rgb.g, 0), 1))
+            buf[o + 2] = Float(Swift.min(Swift.max(rgb.b, 0), 1))
         }
     }
 }

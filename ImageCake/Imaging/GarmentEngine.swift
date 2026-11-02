@@ -49,16 +49,18 @@ enum GarmentEngine {
         let deepRadius = Swift.max(baseRadius + 1, Int(longEdge * deepRatio))
         let base = ImageDocument.blurred(pixels, size: size, radius: baseRadius)
         let deep = ImageDocument.blurred(base, size: size, radius: deepRadius)
-        for i in 0 ..< size.pixelCount {
+        PixelParallel.forEachPixel(&pixels, size.pixelCount) { buf, i in
+            // 只读已定型的 base/deep/weights 与自己那三个通道，写只落在同一下标：
+            // 分带与串行逐比特相同（同一个像素的算术序列一个字节都没改）。
             let k = amount * Double(weights[i])
-            guard k > 0.001 else { continue }
+            guard k > 0.001 else { return }
             let o = i * 4
             for c in 0 ..< 3 {
-                let source = Double(pixels[o + c])
+                let source = Double(buf[o + c])
                 // 只搬"base 与 deep 之差"这一段，`source − base` 原样带回。
                 let texture = source - Double(base[o + c])
                 let moved = Double(deep[o + c]) + texture
-                pixels[o + c] = Float(Swift.min(Swift.max(source + (moved - source) * k, 0), 1))
+                buf[o + c] = Float(Swift.min(Swift.max(source + (moved - source) * k, 0), 1))
             }
         }
     }

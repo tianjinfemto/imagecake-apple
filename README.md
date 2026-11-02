@@ -233,8 +233,8 @@ ImageCake/
 
 | job | 做什么 | 能抓到什么 |
 |---|---|---|
-| `macos-test` | 选 Xcode 16 → 装 XcodeGen → 校验模型清单 → 生成工程 → `xcodebuild test` | 全部 342 格断言；App 宿主测试的签名/`TEST_HOST` 问题 |
-| `ios-build` | 同一套生成流程 → 构建 iOS Simulator → 再把 342 格在模拟器上跑一遍 | UIKit/AppKit 分支、iOS-only SwiftUI API、Info.plist 键，以及 **`#if os(iOS)` 里那些 macOS 一行都执行不到的代码**（`PhotoLibraryWriter` / 相册写回）和 App 在 iOS 运行时上能否被拉起 |
+| `macos-test` | 选 Xcode 16 → 装 XcodeGen → 校验模型清单 → 生成工程 → `xcodebuild test` | 全部 355 格断言；App 宿主测试的签名/`TEST_HOST` 问题 |
+| `ios-build` | 同一套生成流程 → 构建 iOS Simulator → 再把同一批断言在模拟器上跑一遍 | UIKit/AppKit 分支、iOS-only SwiftUI API、Info.plist 键，以及 **`#if os(iOS)` 里那些 macOS 一行都执行不到的代码**（`PhotoLibraryWriter` / 相册写回）和 App 在 iOS 运行时上能否被拉起 |
 | `ios-unsigned-ipa` | Release 构建设备真机包 → 打成未签名 ipa | 只在推 main 或手动触发时跑；侧载人群用（见 [docs/device-check.md](docs/device-check.md) §1.5） |
 
 > 设备名不写死：runner 镜像里的模拟器随 Xcode 版本变，写死 `iPhone 15` 这种名字
@@ -250,7 +250,8 @@ ImageCake/
 
 CI 已跑通（首次全绿：run [40809005087](https://github.com/tianjinfemto/imagecake-apple/actions/runs/40809005087)；
 本批妆容/场景六项首次全绿：run [41272846815](https://github.com/tianjinfemto/imagecake-apple/actions/runs/41272846815)，`39d7f07`，331 格 / 0 failures）。
-当前 tip `92cd656`（模糊核缓冲复用 + 按行/列并行），CI **342 格 / 0 failures**（macOS 与 iPad 模拟器都是）；1024² Release 一次全效果渲染 4832.6ms → 2367.6ms（累计 2.04×），明细见 `docs/pixcake-parity.md` §7。
+上一个已验的 tip `4756ed1`（双边降噪与锐化分带），CI **342 格 / 0 failures**（macOS 与 iPad 模拟器都是）；1024² Release 一次全效果渲染 4832.6ms → 2367.6ms（累计 2.04×），明细见 `docs/pixcake-parity.md` §7。
+本轮把剩下七个逐像素热段（衣物/妆容/区域/发/手/皮肤掩码）也改成分带并行，新增 10 格分带 parity 后工作树是 355 格 —— **这些新代码还没经过编译器，也没声称任何倍速**；数字要等 `macos-perf-release` 这一轮量出来才能写进 §7。
 `macos-test` 与 `ios-build` 并行，加了模拟器测试后一轮约 5 分钟（冷启动模拟器占大头）；
 失败时先看是哪一个 step 变红，再按上表分流。
 

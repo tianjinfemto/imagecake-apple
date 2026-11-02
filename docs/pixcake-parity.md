@@ -234,6 +234,33 @@
         `hand 337ms` / `garment 256ms` / `hair 224ms` / `bodyLine 212ms`（占比重排后）。
         同一条判据适用于它们：只看每个输出是不是只依赖自己的像素或已定型的源数组。
 
+      **第三步（本轮，`PixelParallel.forEachPixel` + 六个引擎分带）—— 数字待 CI 量，本轮不宣称倍速**：
+      按上面那条判据逐个过了一遍，把仍是纯串行 `for i in 0 ..< count` 的热段全部改成分带：
+      `GarmentEngine.deWrinkle`、`MakeupEngine.layDown`、`RegionEnhance` 的
+      `darkCirclePass` / `antiGlarePass` / `thinDarkLinePass`（法令纹与颈纹/妊娠纹共用）/
+      `teethWeights` 那道门 / `modify` / `lumaChannel`、`HairEngine` 五个上色与阻尼环
+      加 `HairMask.build` 的整幅扫描、`HandEngine` 的场构造与上色环加 `HandMask.build`、
+      以及 `SkinMask` 的色域命中/α 相与/脸身分家与字节→浮点转换。
+      新增 `PixelParallel.forEachPixel` 把"必须走指针"这件事收在一处：这些环如果各自手写
+      `withUnsafeMutableBufferPointer`，漏一层就是多线程改同一个 Array 实例，
+      症状是偶发错值而不是编不过。
+      **为什么不顺手做 bbox 限定**：上面那个 `83860e0` 的教训对这几个环同样成立 ——
+      它们虽然逐像素独立，但*输入*是滑窗模糊的结果，裁剪模糊的工作量才会破坏一致性。
+      本轮只动"每个输出只看自己那一个像素"的那一段，模糊保持全图。
+      正确性全部走已有的 `PixelParallel.forcedBands` 钩子（`6e9b38b` 引入的那套并串对照），
+      把十个 case 补进 `ParallelVsSerialParityTests` 而不是另开一个抄参照物的文件：
+      让**同一份实现**分别走 1 带与 N 带要求逐比特相等，比在测试里手抄一份串行版更可靠
+      （抄本会与真实代码漂移）。新增覆盖：衣物祛褶、细暗线共用核、region.modify、
+      头发五个环、手部上色与凸包掩码、上粉、`SkinMask.build` 三层，外加两条分带
+      自身的性质（覆盖恰好一次 × 尺寸同时命中并行与小图分支；短缓冲直接跳过而不是越界写）
+      与一条"权重为 0 的半屏逐比特不变"。夹具还有两个坑要记录：
+      `tameFlyaways` 的三角窗在 w=1 处正好归 0，所以它的夹具权重必须是 0.5；
+      `HairMask` 要的是**非肤色**像素，拿全图肤色的磨皮夹具去测只会得到空掩码 ——
+      两者都会让"并行=串行"变成两边都短路的自证，所以下面每一格都先要求算子真的动了。
+      下一轮该看的数：`region` / `makeup` / `hand` / `garment` / `hair` / `bodyLine` / `skinMask`
+      七段在 1024² Release 下的 ms，以及整幅一次渲染的 2367.6ms 基线对照 ——
+      量不出收益的部分按 `4636b5e` 的先例回退，不留在仓里当"应该更快了"。
+
    > **`83860e0` 的结局：已回退（`4b001fd`），而且是它自己的断言抓出来的。**
    > 转 public 之后 CI 真的跑起来了：`339 tests, 418 failures`，红的全在这批新加的
    > `BlurRectTests`，报的是「半径 1 下矩形内出现 828 个不等的通道」。原因在我这边：
@@ -261,5 +288,5 @@
 7. **🟦 机型镜头库与导出色彩空间**：`LensParameters` 关联 EXIF 机型自动套 profile；
    工作域目前就是 sRGB 显示码（`ICCProfile` 里写明"嵌别的 profile 等于不诚实"），
    要谈 ProPhoto/P3 必须先真做线性工作域 + 输出变换 + 色域映射。
-8. **🟩 真实回归**：320 格双端全绿，但主观效果与硬件路径（联机拍摄、手部检测、
+8. **🟩 真实回归**：342 格双端全绿（本轮新增 10 格分带 parity 待 CI 验），但主观效果与硬件路径（联机拍摄、手部检测、  
    逐脸选中的手感、换发色的观感）仍只能真机验，见 [device-check.md](device-check.md) §2.5。

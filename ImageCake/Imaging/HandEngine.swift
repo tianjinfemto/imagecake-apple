@@ -107,11 +107,21 @@ enum HandMask {
         }
         let base = SkinMask.weights(MaskBuffer(size: size, data: Data(bytes)), size: size)
         var out = [Float](repeating: 0, count: size.pixelCount)
-        for i in 0 ..< size.pixelCount {
-            guard base[i] > 0 else { continue }
-            let o = i * 4
-            if SkinMask.isSkin(r: Double(pixels[o]), g: Double(pixels[o + 1]), b: Double(pixels[o + 2])) {
-                out[i] = base[i]
+        // 逐像素独立（读凸包掩码与自己那三个通道）→ 分带与串行逐比特相同。
+        base.withUnsafeBufferPointer { hull in
+            pixels.withUnsafeBufferPointer { src in
+                out.withUnsafeMutableBufferPointer { dst in
+                    PixelParallel.forEach(size.pixelCount) { start, end in
+                        for i in start ..< end {
+                            let weight = hull[i]
+                            guard weight > 0 else { continue }
+                            let o = i * 4
+                            if SkinMask.isSkin(r: Double(src[o]), g: Double(src[o + 1]), b: Double(src[o + 2])) {
+                                dst[i] = weight
+                            }
+                        }
+                    }
+                }
             }
         }
         return out
@@ -164,11 +174,19 @@ enum HandEngine {
         guard count > 0, weights.count == count else { return }
         var luma = [Float](repeating: 0, count: count)
         var chromaA = [Float](repeating: 0, count: count)
-        for i in 0 ..< count {
-            let o = i * 4
-            let opp = BeautyEngine.opponent(r: Double(pixels[o]), g: Double(pixels[o + 1]), b: Double(pixels[o + 2]))
-            luma[i] = Float(opp.l)
-            chromaA[i] = Float(opp.a)
+        pixels.withUnsafeBufferPointer { src in
+            luma.withUnsafeMutableBufferPointer { lum in
+                chromaA.withUnsafeMutableBufferPointer { chr in
+                    PixelParallel.forEach(count) { start, end in
+                        for i in start ..< end {
+                            let o = i * 4
+                            let opp = BeautyEngine.opponent(r: Double(src[o]), g: Double(src[o + 1]), b: Double(src[o + 2]))
+                            lum[i] = Float(opp.l)
+                            chr[i] = Float(opp.a)
+                        }
+                    }
+                }
+            }
         }
         let radius = Swift.max(4, Int(Double(size.longEdge) * 0.03))
         let meanL = BeautyEngine.blurredChannel(luma, size: size, radius: radius)
@@ -176,9 +194,9 @@ enum HandEngine {
         let even = BeautyParameters.unit(hands.evenTone)
         let red = BeautyParameters.unit(hands.redness)
 
-        for i in 0 ..< count {
+        PixelParallel.forEachPixel(&pixels, count) { buf, i in
             let weight = Swift.min(1, Double(weights[i]))
-            guard weight > 0.001 else { continue }
+            guard weight > 0.001 else { return }
             let l = Double(luma[i])
             var newL = l
             if even > 0 {
@@ -191,13 +209,13 @@ enum HandEngine {
             if red > 0, a > Double(meanA[i]) {
                 newA = a - (a - Double(meanA[i])) * red * weight * 0.8
             }
-            guard newL != l || newA != a else { continue }
+            guard newL != l || newA != a else { return }
             let o = i * 4
-            let source = BeautyEngine.opponent(r: Double(pixels[o]), g: Double(pixels[o + 1]), b: Double(pixels[o + 2]))
+            let source = BeautyEngine.opponent(r: Double(buf[o]), g: Double(buf[o + 1]), b: Double(buf[o + 2]))
             let rgb = BeautyEngine.fromOpponent(l: newL, a: newA, b: source.b)
-            pixels[o] = Float(Swift.min(Swift.max(rgb.r, 0), 1))
-            pixels[o + 1] = Float(Swift.min(Swift.max(rgb.g, 0), 1))
-            pixels[o + 2] = Float(Swift.min(Swift.max(rgb.b, 0), 1))
+            buf[o] = Float(Swift.min(Swift.max(rgb.r, 0), 1))
+            buf[o + 1] = Float(Swift.min(Swift.max(rgb.g, 0), 1))
+            buf[o + 2] = Float(Swift.min(Swift.max(rgb.b, 0), 1))
         }
     }
 }

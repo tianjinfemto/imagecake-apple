@@ -83,13 +83,18 @@ enum SkinMask {
             return Layers(all: empty, face: empty, body: empty, hasFaceConstraint: false)
         }
 
-        // 1. 色域命中 → 二值。
+        // 1. 色域命中 → 二值。逐像素独立，不读邻域也不累加，所以分带与串行
+        //    逐比特相同；这一环是 skinMask 段的全图遍历，大图上不再单线程跑。
         var skin = [UInt8](repeating: 0, count: count)
         image.pixels.withUnsafeBufferPointer { src in
-            for i in 0 ..< count {
-                let o = i * 4
-                if isSkin(r: Double(src[o]), g: Double(src[o + 1]), b: Double(src[o + 2])) {
-                    skin[i] = 255
+            skin.withUnsafeMutableBufferPointer { dst in
+                PixelParallel.forEach(count) { start, end in
+                    for i in start ..< end {
+                        let o = i * 4
+                        if isSkin(r: Double(src[o]), g: Double(src[o + 1]), b: Double(src[o + 2])) {
+                            dst[i] = 255
+                        }
+                    }
                 }
             }
         }
@@ -97,8 +102,14 @@ enum SkinMask {
         // 2. 人像 α 相与：背景里的暖色墙不是皮肤。
         if let person = personMask?.resized(to: size), !person.isEmpty {
             let bytes = [UInt8](person.data)
-            for i in 0 ..< count where skin[i] > 0 {
-                skin[i] = Swift.min(skin[i], bytes[i])
+            skin.withUnsafeMutableBufferPointer { dst in
+                bytes.withUnsafeBufferPointer { alpha in
+                    PixelParallel.forEach(count) { start, end in
+                        for i in start ..< end where dst[i] > 0 {
+                            dst[i] = Swift.min(dst[i], alpha[i])
+                        }
+                    }
+                }
             }
         }
 
@@ -116,18 +127,27 @@ enum SkinMask {
         var bodyBytes = [UInt8](repeating: 0, count: count)
         let allBytes = [UInt8](all.data)
         let rectangles = faceBoxes.map { PixelRect.fromNormalized($0, in: size).expanded(by: Swift.max(2, size.longEdge / 60)) }
-        for y in 0 ..< size.height {
-            let row = y * size.width
-            for x in 0 ..< size.width {
-                let index = row + x
-                let value = allBytes[index]
-                guard value > 0 else { continue }
-                var inFace = false
-                for rect in rectangles where rect.contains(x: x, y: y) {
-                    inFace = true
-                    break
+        // 按行分带：一个像素归脸还是归身只取决于它的坐标，写的两个数组也互不重叠。
+        allBytes.withUnsafeBufferPointer { src in
+            faceBytes.withUnsafeMutableBufferPointer { faceDst in
+                bodyBytes.withUnsafeMutableBufferPointer { bodyDst in
+                    PixelParallel.forEachRow(size.height) { yStart, yEnd in
+                        for y in yStart ..< yEnd {
+                            let row = y * size.width
+                            for x in 0 ..< size.width {
+                                let index = row + x
+                                let value = src[index]
+                                guard value > 0 else { continue }
+                                var inFace = false
+                                for rect in rectangles where rect.contains(x: x, y: y) {
+                                    inFace = true
+                                    break
+                                }
+                                if inFace { faceDst[index] = value } else { bodyDst[index] = value }
+                            }
+                        }
+                    }
                 }
-                if inFace { faceBytes[index] = value } else { bodyBytes[index] = value }
             }
         }
         return Layers(all: all,
@@ -143,7 +163,15 @@ enum SkinMask {
         guard !resized.isEmpty else { return [Float](repeating: 0, count: size.pixelCount) }
         let bytes = [UInt8](resized.data)
         var out = [Float](repeating: 0, count: bytes.count)
-        for i in 0 ..< bytes.count { out[i] = Float(bytes[i]) / 255 }
+        // 这一环在逐张脸、逐个权重类型上都会被调一次，所以也走分带：
+        // 一个字节 → 一个浮点，不读邻域不累加，逐比特与串行相同。
+        bytes.withUnsafeBufferPointer { src in
+            out.withUnsafeMutableBufferPointer { dst in
+                PixelParallel.forEach(bytes.count) { start, end in
+                    for i in start ..< end { dst[i] = Float(src[i]) / 255 }
+                }
+            }
+        }
         return out
     }
 }

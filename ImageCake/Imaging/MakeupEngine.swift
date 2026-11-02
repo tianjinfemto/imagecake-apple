@@ -234,18 +234,21 @@ enum MakeupEngine {
               pixels.count >= count * 4 else { return }
         let (r, g, b) = HexColor.rgb(hex)
         let pigment = BeautyEngine.opponent(r: r, g: g, b: b)
-        for i in 0 ..< count {
+        PixelParallel.forEachPixel(&pixels, count) { buf, i in
+            // 一个唇环/一条眼线的面积只占画面几百到几千分之一，但上粉这
+            // 一环是 makeup 段里跑得最多的一次全图像素遍历：分带后与串行
+            // 逐比特相同（只读 pigment/weight 与自己那三个通道）。
             let k = opacity * Double(weight[i])
-            guard k > 0.001 else { continue }
+            guard k > 0.001 else { return }
             let o = i * 4
-            let source = BeautyEngine.opponent(r: Double(pixels[o]), g: Double(pixels[o + 1]), b: Double(pixels[o + 2]))
+            let source = BeautyEngine.opponent(r: Double(buf[o]), g: Double(buf[o + 1]), b: Double(buf[o + 2]))
             let l = source.l + (pigment.l - source.l) * k * lumaKeep
             let a = source.a + (pigment.a - source.a) * k
             let b2 = source.b + (pigment.b - source.b) * k
             let rgb = BeautyEngine.fromOpponent(l: l, a: a, b: b2)
-            pixels[o] = Float(Swift.min(Swift.max(rgb.r, 0), 1))
-            pixels[o + 1] = Float(Swift.min(Swift.max(rgb.g, 0), 1))
-            pixels[o + 2] = Float(Swift.min(Swift.max(rgb.b, 0), 1))
+            buf[o] = Float(Swift.min(Swift.max(rgb.r, 0), 1))
+            buf[o + 1] = Float(Swift.min(Swift.max(rgb.g, 0), 1))
+            buf[o + 2] = Float(Swift.min(Swift.max(rgb.b, 0), 1))
         }
     }
 
