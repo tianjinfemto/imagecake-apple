@@ -18,11 +18,15 @@ import XCTest
 /// （O(N·r²)），那时慢就不是"Swift 没上 SIMD"，而是算法量级错了 —— 这一条
 /// 不需要任何凭感觉的毫秒阈值就能成立。
 final class RenderPrimitivesBenchmarkTests: XCTestCase {
-    /// 基准尺寸：默认 256（Debug 作业里一次全效果渲染约 6 秒，常驻再大就是自残）。
-    /// Release 作业用 IMAGECAKE_BENCH_SIZE 传 1024，量到真实尺寸的数而不是外推。
+    /// 基准尺寸由**构建配置**决定，不由 CI 变量决定：实测 job 级 env 传不进被测
+    /// App 进程（`IMAGECAKE_BENCH_SIZE: 1024` 设了，表里仍打印 256），而尺寸又必须
+    /// 跟着配置走 —— Debug（-Onone + 越界检查）一次全效果渲染约 6 秒，常驻只能是 256；
+    /// Release 同一段只要 102 毫秒，所以 Release 作业直接量 1024，拿真实尺寸的基线而不
+    /// 是拿缩略图外推。本地用环境变量覆盖仍然生效（便于手跑）。
     private var size: PixelSize {
-        let raw = ProcessInfo.processInfo.environment["IMAGECAKE_BENCH_SIZE"]
-        let edge = Swift.min(Swift.max(Int(raw ?? "") ?? 256, 64), 2048)
+        let fallback = _isDebugAssertConfiguration() ? 256 : 1024
+        let fromEnv = Int(ProcessInfo.processInfo.environment["IMAGECAKE_BENCH_SIZE"] ?? "")
+        let edge = Swift.min(Swift.max(fromEnv ?? fallback, 64), 2048)
         return PixelSize(width: edge, height: edge)
     }
 
