@@ -59,43 +59,47 @@ enum SpatialFilters {
 
         source.withUnsafeBufferPointer { src in
             output.withUnsafeMutableBufferPointer { dst in
-                for y in 0 ..< height {
-                    for x in 0 ..< width {
-                        let center = (y * width + x) * 4
-                        let cr = src[center]
-                        let cg = src[center + 1]
-                        let cb = src[center + 2]
-
-                        var sumR: Float = 0
-                        var sumG: Float = 0
-                        var sumB: Float = 0
-                        var sumWeight: Float = 0
-
-                        for dy in -radius ... radius {
-                            let yy = min(max(y + dy, 0), height - 1)
-                            for dx in -radius ... radius {
-                                let xx = min(max(x + dx, 0), width - 1)
-                                let neighbor = (yy * width + xx) * 4
-                                let dr = src[neighbor] - cr
-                                let dg = src[neighbor + 1] - cg
-                                let db = src[neighbor + 2] - cb
-                                let distance2 = dr * dr + dg * dg + db * db
-                                let bucket = Int(min(distance2 / 3, 1) * 256)
-                                let weight = spatialWeights[(dy + radius) * span + (dx + radius)]
-                                    * rangeLUT[bucket]
-                                sumR += src[neighbor] * weight
-                                sumG += src[neighbor + 1] * weight
-                                sumB += src[neighbor + 2] * weight
-                                sumWeight += weight
+                // 按行分带。每个输出只依赖自己的 5×5 邻域，读的都是已定型的 src，
+                // 写只落在自己那几行 —— 不跳像素累加状态，所以并行与串行逐比特相同。
+                PixelParallel.forEachRow(height) { yStart, yEnd in
+                    for y in yStart ..< yEnd {
+                        for x in 0 ..< width {
+                            let center = (y * width + x) * 4
+                            let cr = src[center]
+                            let cg = src[center + 1]
+                            let cb = src[center + 2]
+        
+                            var sumR: Float = 0
+                            var sumG: Float = 0
+                            var sumB: Float = 0
+                            var sumWeight: Float = 0
+        
+                            for dy in -radius ... radius {
+                                let yy = min(max(y + dy, 0), height - 1)
+                                for dx in -radius ... radius {
+                                    let xx = min(max(x + dx, 0), width - 1)
+                                    let neighbor = (yy * width + xx) * 4
+                                    let dr = src[neighbor] - cr
+                                    let dg = src[neighbor + 1] - cg
+                                    let db = src[neighbor + 2] - cb
+                                    let distance2 = dr * dr + dg * dg + db * db
+                                    let bucket = Int(min(distance2 / 3, 1) * 256)
+                                    let weight = spatialWeights[(dy + radius) * span + (dx + radius)]
+                                        * rangeLUT[bucket]
+                                    sumR += src[neighbor] * weight
+                                    sumG += src[neighbor + 1] * weight
+                                    sumB += src[neighbor + 2] * weight
+                                    sumWeight += weight
+                                }
                             }
+        
+                            if sumWeight > 1e-6 {
+                                dst[center] = sumR / sumWeight
+                                dst[center + 1] = sumG / sumWeight
+                                dst[center + 2] = sumB / sumWeight
+                            }
+                            // alpha 原样保留：降噪是颜色的事，不碰透明度。
                         }
-
-                        if sumWeight > 1e-6 {
-                            dst[center] = sumR / sumWeight
-                            dst[center + 1] = sumG / sumWeight
-                            dst[center + 2] = sumB / sumWeight
-                        }
-                        // alpha 原样保留：降噪是颜色的事，不碰透明度。
                     }
                 }
             }
@@ -116,11 +120,21 @@ enum SpatialFilters {
 
         let blurred = gaussianBlur(image)
         var output = image.pixels
-        for index in stride(from: 0, to: output.count, by: 4) {
-            for channel in 0 ..< 3 {
-                let base = output[index + channel]
-                let difference = base - blurred[index + channel]
-                output[index + channel] = min(max(base + amount * difference, 0), 1)
+        let count = image.size.pixelCount
+        // 合成也是逐像素独立：读 blurred（已定型）与自己那一个像素的原值，
+        // 写只落在同一下标。分带与串行逐比特相同。
+        output.withUnsafeMutableBufferPointer { dst in
+            blurred.withUnsafeBufferPointer { blur in
+                PixelParallel.forEach(count) { start, end in
+                    for i in start ..< end {
+                        let index = i * 4
+                        for channel in 0 ..< 3 {
+                            let base = dst[index + channel]
+                            let difference = base - blur[index + channel]
+                            dst[index + channel] = min(max(base + amount * difference, 0), 1)
+                        }
+                    }
+                }
             }
         }
         return DisplayImage(size: image.size, pixels: output)
@@ -134,29 +148,45 @@ enum SpatialFilters {
         var output = source
         let kernel: [Float] = [0.25, 0.5, 0.25]
 
-        // 水平
-        for y in 0 ..< height {
-            for x in 0 ..< width {
-                for channel in 0 ..< 3 {
-                    var value: Float = 0
-                    for offset in -1 ... 1 {
-                        let xx = min(max(x + offset, 0), width - 1)
-                        value += source[(y * width + xx) * 4 + channel] * kernel[offset + 1]
+        // 指针而不是数组下标：多个线程同时改同一个 Swift 数组实例，即使写的
+        // 下标不相交也是未定义行为（数组不是线程安全的）。走同一个缓冲指针才是
+        // 本仓沿用的写法（见 PixelParallel 与 ToneEngine）。
+        source.withUnsafeBufferPointer { src in
+            horizontal.withUnsafeMutableBufferPointer { hor in
+                // 水平：读 src 的自己那一行，写 hor 的自己那一行。
+                PixelParallel.forEachRow(height) { yStart, yEnd in
+                    for y in yStart ..< yEnd {
+                        for x in 0 ..< width {
+                            for channel in 0 ..< 3 {
+                                var value: Float = 0
+                                for offset in -1 ... 1 {
+                                    let xx = min(max(x + offset, 0), width - 1)
+                                    value += src[(y * width + xx) * 4 + channel] * kernel[offset + 1]
+                                }
+                                hor[(y * width + x) * 4 + channel] = value
+                            }
+                        }
                     }
-                    horizontal[(y * width + x) * 4 + channel] = value
                 }
             }
-        }
-        // 垂直
-        for y in 0 ..< height {
-            for x in 0 ..< width {
-                for channel in 0 ..< 3 {
-                    var value: Float = 0
-                    for offset in -1 ... 1 {
-                        let yy = min(max(y + offset, 0), height - 1)
-                        value += horizontal[(yy * width + x) * 4 + channel] * kernel[offset + 1]
+            // 垂直。这里会读相邻行，但上面那一遍已经完整写完（两次 forEachRow
+            // 之间有同步屏障），而且那一遍把整个缓冲写满了，所以读到的都是定型的值。
+            output.withUnsafeMutableBufferPointer { out in
+                horizontal.withUnsafeBufferPointer { hor in
+                    PixelParallel.forEachRow(height) { yStart, yEnd in
+                        for y in yStart ..< yEnd {
+                            for x in 0 ..< width {
+                                for channel in 0 ..< 3 {
+                                    var value: Float = 0
+                                    for offset in -1 ... 1 {
+                                        let yy = min(max(y + offset, 0), height - 1)
+                                        value += hor[(yy * width + x) * 4 + channel] * kernel[offset + 1]
+                                    }
+                                    out[(y * width + x) * 4 + channel] = value
+                                }
+                            }
+                        }
                     }
-                    output[(y * width + x) * 4 + channel] = value
                 }
             }
         }
