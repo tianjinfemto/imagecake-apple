@@ -74,7 +74,11 @@ enum SpotRepair {
                 let ringMean = (Double(meanOuter[i]) * n2 - Double(meanInner[i]) * n1) / (n2 - n1)
                 let ringSquare = (Double(sqOuter[i]) * n2 - Double(sqInner[i]) * n1) / (n2 - n1)
                 let ringVariance = ringSquare - ringMean * ringMean
-                guard ringVariance >= 0, ringVariance < flatLimit else { continue }
+                // 不能要求方差“≥ 0”：它是“差中之差”（E[x²] 与 (E[x])² 都是两次内外窗相减
+                // 得到的），在 Float 下纯平坦环会算出 ±1e-7 量级的符号随机值。 CI 上就是这样：
+                // 3×3 的斑恰好符号为正所以过了，5×5 斑变微负就被丢光——一个都检不出。
+                // 所以钳到 0 再看上限，而不是拿符号当合法性检查。
+                guard Swift.max(0, ringVariance) < flatLimit else { continue }
                 let depth = ringMean - Double(luma[i])
                 guard depth > darkLimit else { continue }
                 candidates.append((i, depth, ringVariance))
