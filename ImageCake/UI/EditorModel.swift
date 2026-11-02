@@ -503,9 +503,6 @@ final class EditorModel: ObservableObject {
         FrameTriage.geometryReview(document?.faceGeometries.first).summary()
     }
 
-        FrameTriage.geometryReview(document?.faceGeometries.first).summary()
-    }
-
     /// 第 index 张脸当前力度百分比（未设过 = 100 跟随全局）。
     func faceScalePercent(for index: Int) -> Double {
         guard let doc = document, doc.params.faceStrength.scales.indices.contains(index)
