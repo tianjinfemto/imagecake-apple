@@ -303,9 +303,11 @@ final class ParallelVsSerialParityTests: XCTestCase {
             for x in 0 ..< size.width / 2 { weight[y * size.width + x] = 1 }
         }
         let untouched: (String, [Float]) -> Void = { label, got in
-            for y in 0 ..< size.height {
-                for x in (size.width / 2 + 1) ..< size.width {
-                    let o = (y * size.width + x) * 4
+            // 这个闭包被当成显式函数类型的变量使用， Swift 要求写 self.size（否则报
+            // "reference to property in closure requires explicit use of self"）。
+            for y in 0 ..< self.size.height {
+                for x in (self.size.width / 2 + 1) ..< self.size.width {
+                    let o = (y * self.size.width + x) * 4
                     for c in 0 ..< 4 {
                         XCTAssertEqual(got[o + c], input[o + c],
                                        "\(label): 权重为 0 的像素被改了（第 \(c) 通道）")

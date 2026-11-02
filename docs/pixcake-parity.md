@@ -259,9 +259,11 @@
       曾抖 21% —— 这就证实了 min-of-7 是比 median-of-3 稳得多的统计量，10~20% 这一档的
       改动从此可测。Debug 侧同理（1.28× / 1.47×）。344 格 / 0 failures 在 macOS 与 iPad
       模拟器上都成立，含新的抖动上限守卫。
-      还欠一步才算完整：要和"改前"公平比较，得用**同一把新尺子**重测优化前的构建
-      （`f256e43` 当时只有 median-of-3 = 4832.6ms），否则 2425 对 4832 混了两种统计口径。
-      这一步留给下一个性能提交顺手做（在旧 commit 的分支上 dispatch 一次 perf job）。      **第三步（本轮，`PixelParallel.forEachPixel` + 六个引擎分带）—— 数字待 CI 量，本轮不宣称倍速**：
+      **公平改前基线已补（分支 `perf-rebaseline` = `f256e43` 的生产代码 + 只换尺子，
+      run 41396239876）**：Release 1024² **最小 4204.3ms**、中位 4824.3ms、跑内
+      1.37×，334 格 / 0 failures。对 main 的最小 2425.0ms 就是 **1.73×** —— 这次两个数
+      是同一个统计量（min-of-7），不再是最小值除中位数。跑内比值 1.37× 也说明
+      单次跑内仍有不小波动，所以只有远大于它的数才算结论。      **第三步（本轮，`PixelParallel.forEachPixel` + 六个引擎分带）—— 数字待 CI 量，本轮不宣称倍速**：
       按上面那条判据逐个过了一遍，把仍是纯串行 `for i in 0 ..< count` 的热段全部改成分带：
       `GarmentEngine.deWrinkle`、`MakeupEngine.layDown`、`RegionEnhance` 的
       `darkCirclePass` / `antiGlarePass` / `thinDarkLinePass`（法令纹与颈纹/妊娠纹共用）/
