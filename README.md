@@ -233,7 +233,7 @@ ImageCake/
 
 | job | 做什么 | 能抓到什么 |
 |---|---|---|
-| `macos-test` | 选 Xcode 16 → 装 XcodeGen → 校验模型清单 → 生成工程 → `xcodebuild test` | 全部 344 格断言；App 宿主测试的签名/`TEST_HOST` 问题 |
+| `macos-test` | 选 Xcode 16 → 装 XcodeGen → 校验模型清单 → 生成工程 → `xcodebuild test` | 当前工作树的全部 352 格断言（上一个已验 tip 是 344）；App 宿主测试的签名/`TEST_HOST` 问题 |
 | `ios-build` | 同一套生成流程 → 构建 iOS Simulator → 再把同一批断言在模拟器上跑一遍 | UIKit/AppKit 分支、iOS-only SwiftUI API、Info.plist 键，以及 **`#if os(iOS)` 里那些 macOS 一行都执行不到的代码**（`PhotoLibraryWriter` / 相册写回）和 App 在 iOS 运行时上能否被拉起 |
 | `ios-unsigned-ipa` | Release 构建设备真机包 → 打成未签名 ipa | 只在推 main 或手动触发时跑；侧载人群用（见 [docs/device-check.md](docs/device-check.md) §1.5） |
 
@@ -251,7 +251,7 @@ ImageCake/
 CI 已跑通（首次全绿：run [40809005087](https://github.com/tianjinfemto/imagecake-apple/actions/runs/40809005087)；
 本批妆容/场景六项首次全绿：run [41272846815](https://github.com/tianjinfemto/imagecake-apple/actions/runs/41272846815)，`39d7f07`，331 格 / 0 failures）。
 已验的 tip（性能两步做完、第三步撤完之后）CI **344 格 / 0 failures**（macOS 与 iPad 模拟器都是）；1024² Release 一次全效果渲染 **最小 2425ms**（7 次取 min；改前只有 median-of-3 = 4832.6ms，两种口径不能直接相除，公平重测见 §7），明细与测量口径见 `docs/pixcake-parity.md` §7。
-实际落地的只有两处并行：**模糊核**（缓冲复用 + 按行/按列分带）与**双边降噪/高斯锐化**。把 `BeautyEngine` 三个 pass 也分带的那一步（`6e9b38b`）**已撤掉** —— 结果与串行逐比特相同，但整机 2367.6ms → 2411.7ms，落在共享 runner 的 ±10% 抖动里，量不出收益就不留在代码里。其余热段（妆容/区域/衣物/发/手）仍是逐像素串行，动它们之前要先解决测量口径：多次取 min、拿未改动的段当内部对照，否则真假分不出来。
+实际落地的并行有三处：**模糊核**（缓冲复用 + 按行/按列分带）、**双边降噪/高斯锐化**，以及 `ab82107` 把剩下六个逐像素热段（衣物祛褶 / 上粉 / 区域与细线 / 头发 / 手 / 皮肤掩码）改成分带。把 `BeautyEngine` 三个 pass 也分带的那一步（`6e9b38b`）**已撤掉** —— 结果与串行逐比特相同，但整机 2367.6ms → 2411.7ms，落在共享 runner 的抖动里，量不出收益就不留在代码里。要说清一件事：撤那一步的同一批改动里，撑住上面六个引擎的并串对照用例也被一并删掉了，而它们仍接在 `PixelParallel` 上 —— 本轮把 `ParallelVsSerialParityTests` 的 10 个用例恢复回来（工作树 352 格，待 CI 验），否则仓里就是“文件头声称覆盖 = 已并行的内核，而六个已并行的内核无覆盖”这个自相矛盾。这六段到底快没快，得用新尺子（同一次跑内 7 次取 min + 拿未改动的段当内部对照）量了才能写数；量不出就同样按先例回退。
 `macos-test` 与 `ios-build` 并行，加了模拟器测试后一轮约 5 分钟（冷启动模拟器占大头）；
 失败时先看是哪一个 step 变红，再按上表分流。
 
