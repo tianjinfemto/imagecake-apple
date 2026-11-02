@@ -103,25 +103,38 @@ final class RenderBenchmarkTests: XCTestCase {
         let warmup = RenderPerf()
         _ = document.render(perf: warmup)
 
+        // 7 次而不是 3 次，并且以**最小值**为主口径：实测同一份代码在同一类 runner
+        // 上能差 21%（2367.6ms 与 2872.1ms 是同一个构建），3 次中位数分辨不出 10~20%
+        // 这个档位的改动，而剩下几个热段想要的收益正好在这一档。共享机器上只有
+        // 最快那次受干扰最小；中位数一并打印，两个数都留着才看得出抖动有多大。
         var totals: [Double] = []
         var last = RenderPerf()
-        for _ in 0 ..< 3 {
+        var bestTotal = Double.greatestFiniteMagnitude
+        for _ in 0 ..< 7 {
             let perf = RenderPerf()
             _ = document.render(perf: perf)
             totals.append(perf.stageTotalMS)
-            last = perf
+            if perf.stageTotalMS < bestTotal {
+                bestTotal = perf.stageTotalMS
+                last = perf
+            }
         }
-        let median = totals.sorted()[(totals.count - 1) / 2]
+        let sorted = totals.sorted()
+        let median = sorted[sorted.count / 2]
+        let minimum = sorted.first ?? median
+        let spread = minimum > 0 ? (sorted.last ?? minimum) / minimum : 0
 
-        // ① 打印分阶段表（CI 日志里累积对照）。
+        // ① 打印分阶段表（CI 日志里累积对照）。占比的分母用最快那次的总时长，
+        // 这样表里的毫秒与百分比属于同一次跑，而不是拼凑出来的。
         let medianText = String(format: "%.1f", median)
-        print("=== [\(RenderPerf.buildConfig)] 渲染基准 \(size.width)×\(size.height) · 中位 \(medianText)ms / 三次 \(totals.map { Int($0) }) ===")
+        let minText = String(format: "%.1f", minimum)
+        print("=== [\(RenderPerf.buildConfig)] 渲染基准 \(size.width)×\(size.height) · 最慢/最快比 \(String(format: "%.2f", spread))× · 最小 \(minText)ms · 中位 \(medianText)ms（\(totals.count) 次）===")
         if RenderPerf.buildConfig == "DEBUG" {
             print("   ↑ 这是 Debug 构建（-Onone + 数组越界检查）：它描述开发模式，不是交付给用户的 App。")
             print("     拿它当“该不该上 SIMD/GPU”的依据会得出错结论；Release 的数走 perf job 或本地跑。")
         }
         for sample in last.samples.sorted(by: { $0.ms > $1.ms }) {
-            let share = median > 0 ? sample.ms / median * 100 : 0
+            let share = bestTotal > 0 ? sample.ms / bestTotal * 100 : 0
             print(String(format: "  %8.2f ms  %5.1f%%  %@", sample.ms, share, sample.name))
         }
 
@@ -139,6 +152,14 @@ final class RenderBenchmarkTests: XCTestCase {
         // 现在留的是"一个数量级"的余量，防的是从百毫秒变成十秒那种事故。
         XCTAssertLessThan(median, 20_000,
                           "256² 一次渲染中位 \(median)ms：这个量级不可能是慢，而是嵌套循环或每页重建缓冲")
+
+        // ③b 同一次跑内部的抖动上限。这台机器曾量到同一构建差 21%，所以 3× 以内的
+        // 波动当作可接受的噪声；超过它就不是“慢了一点”，而是有东西不定性地重做了
+        // （比如缓存没复用、或某个阶段开始每次分配）。这个上限故意宽松，防的是事故。
+        XCTAssertLessThan(spread, 3.0,
+                          "\(totals.count) 次里最慢/最快 = \(String(format: "%.2f", spread))×（\(totals.map { Int($0) })）"
+                              + "：超过 3× 就不是抖动而是有不确定的额外工作")
+        XCTAssertGreaterThan(minimum, 0)
 
         // ④ 结构性检查：几何阶段不该是主要开销（它是恒等跳过的路径）。
         if let geometry = last.milliseconds(for: "geometry"), geometry > median * 0.5 {
