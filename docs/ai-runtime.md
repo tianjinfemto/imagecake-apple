@@ -76,7 +76,7 @@ let typeInfo: ORTValueTypeInfo? = try value.typeInfo()
 | Vision 也失败 | 不出罩 | `[no_person]`，面板提示重试 |
 | LaMa 缺件 | 不修复 | `[no_model:inpainting_lama_2025jan.onnx]` |
 | LaMa 选区超出单窗（>480px） | 不做部分修复 | `[region_too_large]`，请分次框选 |
-| LaMa 只有一个输入（image+mask 拼 4 通道） | 拒收，不猜通道 | `[no_mask_input]` 语义的 badShape 文案 |
+| LaMa 只有一个输入（image+mask 拼 4 通道） | 拒收，不猜通道 | `[no_mask]` 语义的 badShape 文案 |
 | 超清缺件 / 输出 >60MP | 不输出 | `[no_model:…]` / `[too_large]` |
 | GFPGAN 缺件 | 不重绘 | `[no_model:…]` |
 | 全部脸闭眼 | 不重绘 | `[closed_eyes]`，原图交回 |

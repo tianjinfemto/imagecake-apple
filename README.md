@@ -266,6 +266,28 @@ CI 已跑通（首次全绿：run [40809005087](https://github.com/tianjinfemto/
 > 本项目实际踩过：原文是 `The job was not started because recent account payments
 > have failed or your spending limit needs to be increased`（macOS 分钟按 5× 计入套餐额度）。
 
+### 推 CI 之前先跑本地那一套（不花分钟）
+
+额度两次把开发卡住之后，把“能本地判定的错”就地判掉成了必需：
+
+```bash
+python3 scripts/preflight.py            # 五项全跑，退出码 = 失败的检查数
+python3 scripts/preflight.py lex cjk    # 只跑需要的
+```
+
+| 脚本 | 能拦住什么（都是真烧过 CI 轮次的形态） |
+|---|---|
+| `swift_lex_check.py` | 分隔符不配对与字符串/注释未终止。处理了 Swift 特有的嵌套块注释、`\(...)` 插值（代码回到字符串里）、`"""` 与 `#"..."#`。**自带 `--self-test`**：10 个“合法但刁钻”的样本零误报，7 个已知错误形态全部抓住。 |
+| `wiring_check.py` | 参数字段 ↔ `CodingKeys`/decode/encode/clamp/`knownKeys` 五处对齐；`isNeutral` 分组在 `render()` 里没消费者；`Imaging` 里有 `apply()` 但全仓无调用点（哑资产）；`requires` 前缀写了但同步规则不留；文档里写了代码已不再发出的令牌。后一条当场抓到一处真问题：文档里写着一个代码实际从不发出的令牌（正确的那个是 `[no_mask]`），已改。 |
+| `cjk_check.py` | 编辑通道把单个汉字换成形近字（褶→裁/要、撒→鞰、颊→膣、锚→锦/锤、绝→绘/绍）与非 UTF-8 文件；`--expect <文件> <词...>` 用于改完立即回读断言。**统计式“稀用字”探测已删**：实测 142 个文件报 244 条，几乎全是正常中文（重启/面颊/创建），分不清噪声的检查不如没有。 |
+| `preflight.py` | 上面三项 + `fetch_models.py --list` + PowerShell 解析（`syntax-check.ps1`）的一个入口。 |
+
+> **这些检查不能证明什么（写在这里，不让“本地绿”被误读成“已验证”）**：它不
+> 编译 —— 类型、协议一致性、参数标签、运行时 trap（比如那个 UInt8 减法）仍需要
+> macOS runner；它不跑测试；它也支撑不了任何性能主张（计时必须是 Release）。
+> 子进程输出用字节取回再兜底解码：这台机器上子工具按控制台代码页（GBK）输出
+> 中文，`text=True` + UTF-8 会静默拿到空串，把“没输出”当成“通过”。
+
 ---
 
 ## 五、与 imagecake 的关系
