@@ -204,6 +204,10 @@ enum ExportPipeline {
         // 导出报告里的耗时行：与预览同一口径、同一个类型，只是多带几个 AI 阶段。
         // 它不靠肉眼验收：没有这一行，“导出特别慢”永远只能凭感觉说。
         notes.append("[perf] " + perf.summary())
+        // 好片初筛（确定性三轴：清晰度 / 截幅 / 曝光）。它进报告而不是进弹窗：
+        // 导出口径上看到数，才不会把它误当"自动删片"的授权。面板入口本轮没做,
+        // 所以这里只声明已有消费者是报告，不假称 UI 有入口。
+        notes.append("[triage] " + FrameTriage.review(display).summary())
         return ExportOutcome(display: display, notes: notes)
     }
 
