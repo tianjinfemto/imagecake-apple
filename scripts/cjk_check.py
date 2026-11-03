@@ -59,6 +59,12 @@ KNOWN_BAD = {
 }
 
 CJK = re.compile(r'[\u4e00-\u9fff]')
+# Legitimate word pairs that contain a KNOWN_BAD string by accident. Each entry must
+# say which two words collide, so the next reader knows this is not an exemption of the
+# underlying swap.
+KNOWN_OK = (
+    '权限限制',   # 权限 + 限制 -- contains the 限限制 duplication shape
+)
 SKIP_DIRS = {'.git', 'build', 'DerivedData', '.codeartsdoer'}
 
 
@@ -88,6 +94,22 @@ def read_text(path):
         return None, 'not valid UTF-8 (%s) -- a mangled write landed' % exc.reason
 
 
+def _inside_known_ok(text, start, end):
+    """The benign phrase covering [start, end), or None.
+
+    Without this, "权限限制" (权限 + 限制, both ordinary words) reads as the duplication
+    artifact 限限制 and shouts at correct prose. A detector that cries wolf on real
+    Chinese gets switched off, which is worse than not having it.
+    """
+    for ok in KNOWN_OK:
+        i = text.find(ok)
+        while i >= 0:
+            if i <= start and end <= i + len(ok):
+                return ok
+            i = text.find(ok, i + 1)
+    return None
+
+
 def scan(files):
     hits = []
     for path in files:
@@ -97,6 +119,8 @@ def scan(files):
             continue
         for bad, why in KNOWN_BAD.items():
             for m in re.finditer(re.escape(bad), text):
+                if _inside_known_ok(text, m.start(), m.end()):
+                    continue
                 hits.append('%s:%d: %s -> U+%04X expected %s'
                             % (path, text[:m.start()].count('\n') + 1, bad,
                                ord(bad[-1]), why))

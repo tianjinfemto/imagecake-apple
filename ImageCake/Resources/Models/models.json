@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "default_tier": "core",
-  "note": "模型清单是唯一真相：App 读它决定去哪找/怎么校验/怎么喂；scripts/fetch_models.py 读同一份去下载。字节数与 sha256 逐条对齐 imagecake 的 scripts/fetch_models.ps1，换一颗权重必须两处同时改。",
+  "note": "模型清单是唯一真相：App 读它决定去哪找/怎么校验/怎么喂；scripts/fetch_models.py 读同一份去下载。字节数与 sha256 逐条对齐 imagecake 的 scripts/fetch_models.ps1，换一颗权重必须两处同时改。purpose 会原样显示在「模型」面板上，所以它是给用户的承诺：写「已接线」就必须有任务调用它，写「备用」就必须全仓无引用（wiring_check.py 双向检查这一条）。",
   "models": [
     {
       "id": "matting_modnet",
@@ -92,7 +92,7 @@
       "license": "见上游仓库",
       "commercialUse": "unknown",
       "tier": "core",
-      "purpose": "478 点人脸关键点（瘦脸/五官/眼型的几何来源；v1 未接线）",
+      "purpose": "478 点人脸关键点：瘦脸/五官/眼型/妆容区域的几何来源（FaceLandmarksTask 已接线，驱动 ShapeWarp、RegionEnhance、MakeupEngine 与智能构图）",
       "source": { "repo": "senty-au/face_landmarks_detector-ONNX", "path": "onnx/model.onnx" },
       "io": { "layout": "nchw", "colorOrder": "rgb", "valueRange": "unit" }
     },
@@ -104,7 +104,7 @@
       "license": "Apache-2.0",
       "commercialUse": "allowed",
       "tier": "core",
-      "purpose": "YuNet 人脸检测（v1 走 Vision 检测；这颗留作无 Vision 环境的备用）",
+      "purpose": "YuNet 人脸检测（备用：仓里没有任何任务引用它，人脸检测走 Vision）",
       "source": { "repo": "opencv/face_detection_yunet", "path": "face_detection_yunet_2023mar.onnx" },
       "io": { "layout": "nchw", "colorOrder": "bgr", "valueRange": "unit" }
     },
@@ -116,7 +116,7 @@
       "license": "Apache-2.0",
       "commercialUse": "allowed",
       "tier": "onDemand",
-      "purpose": "RTMPose-m 17 点身形（美体液化几何；v1 未接线）",
+      "purpose": "RTMPose-m 17 点身形：美体液化几何（BodyPoseTask 已接线，先抠图再出关节点，驱动 ShapeWarp 的细腰/瘦腿/增高/天鹅颈/直角肩）",
       "source": { "repo": "bukuroo/RTMPose-ONNX", "path": "rtmpose-m.onnx" },
       "io": { "layout": "nchw", "colorOrder": "rgb", "valueRange": "unit" }
     },
@@ -128,7 +128,7 @@
       "license": "Apache-2.0（上游）/ FairFace 数据集 CC BY 4.0",
       "commercialUse": "check",
       "tier": "onDemand",
-      "purpose": "FairFace 年龄分类（批量分组；v1 未接线）",
+      "purpose": "FairFace 年龄分类（FaceAttrTask 已接线，与性别两颗一起跑；结果只给「AI」面板按脸显示，不进渲染管线）",
       "source": { "repo": "onnx-community/fairface_age_image_detection-ONNX", "path": "onnx/model_int8.onnx" },
       "io": { "layout": "nchw", "colorOrder": "rgb", "valueRange": "unit" }
     },
@@ -140,7 +140,7 @@
       "license": "Apache-2.0（上游）/ FairFace 数据集 CC BY 4.0",
       "commercialUse": "check",
       "tier": "onDemand",
-      "purpose": "FairFace 性别分类（批量分组；v1 未接线）",
+      "purpose": "FairFace 性别分类（FaceAttrTask 已接线；结果只给「AI」面板按脸显示，不进渲染管线）",
       "source": { "repo": "onnx-community/fairface_gender_image_detection-ONNX", "path": "onnx/model_int8.onnx" },
       "io": { "layout": "nchw", "colorOrder": "rgb", "valueRange": "unit" }
     },
@@ -152,7 +152,7 @@
       "license": "见上游仓库",
       "commercialUse": "unknown",
       "tier": "onDemand",
-      "purpose": "106 点关键点（备用；v1 未接线）",
+      "purpose": "106 点关键点（备用：仓里没有任何任务引用它，接线前请在面板标注为未接线）",
       "source": { "repo": "kunkunlin1221/face-landmarks-2d-106_mbv1", "path": "coordinate_reg_mbv1_fp32.onnx" },
       "io": { "layout": "nchw", "colorOrder": "rgb", "valueRange": "unit" }
     }

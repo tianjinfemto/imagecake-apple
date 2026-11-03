@@ -1,8 +1,9 @@
 # 与 imagecake 的模块对照
 
-状态标记：✅ 已实现并接线 ｜ ⛔ 平台限制或需额外模型权重
+状态标记：✅ 已实现并接线 ｜ 🟦 引擎与断言已实现、但没有入口（用户拿不到）｜ ⛔ 平台限制或需额外模型权重
 
 **总原则**：能力差距不是"漏了"，是**平台限制或模型缺失**。v1 把"端到端能跑通、失败能点名"的部分全做完。
+"有算子没入口"单独标 🟦：它比"没做"更坏，因为文档、断言与代码都是绿的，只有用户拿不到。
 
 ## 1. 调色与几何
 
@@ -68,15 +69,15 @@
 | 批量队列 | ✅ | `BatchQueue`：串行处理多张图，每张完成后报告进度，失败不中断队列。**本轮接上入口**：「批量」面板 + `SyncGroups`/`ParamSync` 六组同步（调色/美肤/美型/风格/背景/交付端）——像素蛋糕式“一张调好→其余同步”，而手动液化与修复补丁不在 `EditParameters` 里，所以类型上就拿不走 |
 | 联机拍摄 | ⚠️ | 部分：`TetherCapture`（AVFoundation 枚举/接入/`capturePhoto` 新式 completionHandler）+ `TetherPlan`（选设备优先级外接>连续互通>内置、连拍队列上限 60 张、文件名 `tether-<时间戳>-<序号>`）。可验证部分全在纯函数里并有断言；相机本体只能真机验。iPad 侧 UVC 需 external-camera entitlement（未签名包拿不到 → `[no_camera]`）；不是厂商联机协议 |
 | CLI | ⛔ | iPadOS 无 CLI 等价路径；macOS 可通过 `xcodebuild` 跑测试但无独立 CLI |
-| XMP 导入 | ✅ | `XMPImporter`：正则抽 crs: 属性，约 40 键映射到 `EditParameters`（曝光/色温/色调/对比/饱和/HSL/色轮等），未知键跳过并报告 |
+| XMP 导入 | ✅ | `XMPImporter`：正则抽 crs: 属性，约 40 键映射到 `EditParameters`（曝光/色温/色调/对比/饱和/HSL/色轮等），未知键跳过并报告。**本轮掘出并修掉一个“入口缺口”**：引擎与断言都在、`EditorModel` 也留了方法，但全仓无面板调用 → 已接进工具栏「预设」菜单（「读图旁边的 .xmp」与「从 .xmp 导入…」），四条失败路径各自点名（`[no_xmp_source]` / `[no_xmp_sidecar]` / `[xmp_unreadable]` / `[xmp_no_mapping]`）。顺手补上以前根本没接的高光半边：`SplitToningHighlight*` → `whl*`（三个 enum case 存在但没有任何 mapKey 返回它们）|
 | 用量统计 | ⛔ | 本项目没有点数语义，不需要 |
 
 ## 4. 工程与验证
 
 | imagecake | 本仓 |
 |---|---|
-| 1000+ C++ 断言（Catch2 风格自研） | 320 格 XCTest（几何/色彩/色轮与 HSL/色轮坐标/画布视口/空间滤波/补光与高光/文件名模板/去色边/撤销栈与笔迹入栈/笔迹栅格化/液化/仿制图章/保护笔刷/文档级渲染管线与跨分辨率重放/笔刷手势采样/几何变换/老照片修复/修补工具/智能构图/XMP 导入/拼图/ICC/装饰叠加/本地调节与三形状蒙版/容器/预设契约/**皮肤掩码与六个美肤算子**/**关键点派生几何与区域美化**/**位移场与脸型美体预设**/**.cube 全链路 + 内置风格**/**镜头与颗粒确定性**/**证件照规格与排版**/**ParamSync 同步组**/**文档级几何生效与缺件点名**/**逐脸美化与两个专项目**/**直方图与溢出叠层**/**拼图适配与导出接线**/**素材库与 sidecar**/**妆容模板与眉/眼带派生**/**头发、手部、衣物三个新区域算子**/**天空连通生长与合成**/**只加不减且分辨率无关的方向光**/**多帧堆栈对齐与三种堆法**/**联机拍摄的决策层**） |
+| 1000+ C++ 断言（Catch2 风格自研） | 375 格 XCTest（**口径：一格 = 一个 `func test…()`**，与 README §四 的唯一计数处同源，`wiring_check.py` 会拿它与工作树对账；已验 tip `b17962c` 是 372 格，本批 +3 格归 XMP 入口）几何/色彩/色轮与 HSL/色轮坐标/画布视口/空间滤波/补光与高光/文件名模板/去色边/撤销栈与笔迹入栈/笔迹栅格化/液化/仿制图章/保护笔刷/文档级渲染管线与跨分辨率重放/笔刷手势采样/几何变换/老照片修复/修补工具/智能构图/XMP 导入/拼图/ICC/装饰叠加/本地调节与三形状蒙版/容器/预设契约/**皮肤掩码与六个美肤算子**/**关键点派生几何与区域美化**/**位移场与脸型美体预设**/**.cube 全链路 + 内置风格**/**镜头与颗粒确定性**/**证件照规格与排版**/**ParamSync 同步组**/**文档级几何生效与缺件点名**/**逐脸美化与两个专项目**/**直方图与溢出叠层**/**拼图适配与导出接线**/**素材库与 sidecar**/**妆容模板与眉/眼带派生**/**头发、手部、衣物三个新区域算子**/**天空连通生长与合成**/**只加不减且分辨率无关的方向光**/**多帧堆栈对齐与三种堆法**/**联机拍摄的决策层**/**并串逐比特对照（`PixelParallel.forcedBands`）**/**好片初筛与背景灰点检出**） |
 | 无头 CLI 回归 | 无（iPadOS 无 CLI） |
 | 权重清单 + 双校验 | ✅ 同一份 `models.json`，脚本与 App 共用 |
-| 缺件点名令牌 | ✅ `[no_model:file]` / `[fallback:vision]` / `[closed_eyes]` / `[too_large]` / `[patch_scaled]` / `[no_mask]` / `[no_face]` / `[no_person]` / `[no_landmarks]` / `[no_pose]` / `[no_constraint]` / `[no_lut:名字]` / `[clipping]` / `[out_of_range]` / `[collage_short]` / `[collage_failed]` / `[collage_no_template]` / `[sidecar_conflict]` / `[no_scope]` / `[no_hand]` / `[no_garment_region]` / `[no_makeup:名字]` / `[no_sky_mask]` / `[no_sky:名字]` / `[fallback:sky-colour-locus]` / `[frames_short]` / `[stack]` / `[no_camera]` / `[camera_timeout]` |
+| 缺件点名令牌 | ✅ `[no_model:file]` / `[fallback:vision]` / `[closed_eyes]` / `[too_large]` / `[patch_scaled]` / `[no_mask]` / `[no_face]` / `[no_person]` / `[no_landmarks]` / `[no_pose]` / `[no_constraint]` / `[no_lut:名字]` / `[clipping]` / `[out_of_range]` / `[collage_short]` / `[collage_failed]` / `[collage_no_template]` / `[sidecar_conflict]` / `[no_scope]` / `[no_hand]` / `[no_garment_region]` / `[no_makeup:名字]` / `[no_sky_mask]` / `[no_sky:名字]` / `[fallback:sky-colour-locus]` / `[frames_short]` / `[stack]` / `[no_camera]` / `[camera_timeout]` / `[no_xmp_source]` / `[no_xmp_sidecar]` / `[xmp_unreadable]` / `[xmp_no_mapping]`，与初筛族的 `[blurry]` `[flat-content]` `[closed-eyes]` `[subject-at-edge]`、背景灰点检出的 `[spot-repair:N]` |
 | 三端（Win/Linux/macOS） | 双端（macOS/iPadOS），SwiftUI 单代码库 |

@@ -13,7 +13,11 @@ and catches the classes of mistake that used to cost a full round each:
   wiring   -- parameter fields vs CodingKeys/decode/encode/clamp/knownKeys, a
              parameter group no render path consumes, an engine with no call site
              (the "哑资产" shape), requires prefixes not kept by the sync filter,
-             and documented tokens that code no longer emits.
+             documented tokens that code no longer emits, a model manifest purpose
+             that contradicts whether a task reads that weight, an entry reachable
+             only from EditorModel while no panel calls it, a doc that still calls a
+             shipped capability a gap, and documented test-case counts vs the tree.
+             Self-test the checker itself with: python scripts/wiring_check.py --self-test
   cjk      -- known look-alike character swaps in Chinese prose, and files that are
              not valid UTF-8.
   manifest -- scripts/fetch_models.py --list (the model manifest is the single source
@@ -59,7 +63,8 @@ def run_lex():
 def run_wiring():
     # wiring_check.main() prints its findings and returns the count; its lex pass is
     # the same one run_lex already did, so reuse the exit code as the finding count.
-    return wiring_check.main(), 'parameters, render wiring, tokens'
+    return wiring_check.main(), ('parameters, render wiring, tokens, manifest claims, '
+                                 'UI entries, doc gap claims, test counts')
 
 
 def run_cjk():

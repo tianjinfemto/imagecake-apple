@@ -17,6 +17,11 @@ out/
 *.log
 .DS_Store
 
+# Python 检查器的字节码（scripts/ 下的 .py 才是真相）：以前未忽略，跑一次 preflight
+# 就把两个 .pyc 的改动混进工作树，与项目自己的「单一真相」相冲
+__pycache__/
+*.pyc
+
 # 编辑器本地设置（不该进仓；仓库已公开）
 .arts/
 .vscode/
