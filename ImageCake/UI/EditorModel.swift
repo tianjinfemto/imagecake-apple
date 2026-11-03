@@ -848,6 +848,35 @@ final class EditorModel: ObservableObject {
         status = "已撤销最近一次消除"
     }
 
+    /// 自动检出背景平坦区的孤立暗点，转成**修补笔迹**提意（不自动改画面）。
+    ///
+    /// 为什么只提意：误检的代价是把人身上的颜色抹掉一块，而漏检只是背景留个灰点，
+    /// 两者不对称。提意走的是与手动画完全同一条路（`patchStrokes` -> 渲染链的
+    /// `patch` 阶段），因此笔数看得见、可逐笔撤销、也会照常进撤销栈与导出。
+    ///
+    /// 判据本身（环域平坦 + 只找暗点 + 肤色与脸框排除）与它的反误检测试在
+    /// `SpotRepair` 里；这里只负责把结果落到画面上，并保留令牌供状态栏点名。
+    func autoDetectSpots() {
+        guard var doc = document else { return }
+        // 用当前画面而不是原图来判：用户已经做的裁剪/调色会改变"哪里是平坦背景"。
+        let frame = doc.render()
+        let result = SpotRepair.detect(frame, faceBounds: doc.faceGeometry?.bounds)
+        guard !result.found.isEmpty else {
+            status = "背景未检出污点 · " + result.tokens.joined(separator: " ")
+            return
+        }
+        for spot in result.found {
+            doc.patchStrokes.append(PatchStroke(source: spot.source,
+                                                points: [spot.at],
+                                                radius: spot.radius,
+                                                hardness: 0.6))
+        }
+        document = doc
+        scheduleRender()
+        status = "检出 \(result.found.count) 处背景灰点，已加入修补笔迹（共 \(doc.patchStrokes.count) 笔）· "
+            + result.tokens.joined(separator: " ")
+    }
+
     func clearPatches() {
         guard var doc = document, !doc.patches.isEmpty else { return }
         doc.patches.removeAll()

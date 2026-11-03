@@ -180,6 +180,16 @@ struct AIPanel: View {
                 }
                 .buttonStyle(.bordered)
                 .disabled(model.document?.patches.isEmpty ?? true)
+
+                Button {
+                    model.autoDetectSpots()
+                } label: {
+                    Label("挑背景灰点", systemImage: "circle.dotted")
+                }
+                .buttonStyle(.bordered)
+                .disabled(model.document == nil || model.busy != nil)
+                .help("在脸框与肤色之外、亮度平坦的背景里找孤立暗点，生成为可撤销的修补笔迹。"
+                      + "只提意不动手：误检抹掉人身上一块的代价比留个灰点大得多。")
             }
 
             Text("修复以「相对量」缓存：改曝光后补丁仍然有效，不会在遮罩外沿留一圈旧亮边。")
