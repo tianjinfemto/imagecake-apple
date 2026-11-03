@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 import SwiftUI
 
 // 编辑器的状态机。
@@ -1497,14 +1498,53 @@ final class EditorModel: ObservableObject {
 
     // MARK: - XMP 导入
 
-    func importXMP(_ xmp: String) {
+    /// 读图旁边的 `<图名>.xmp`（Lightroom / Camera Raw 的旁挂约定）。
+    ///
+    /// 三条失败路径都必须点名：没有可定位的源文件、旁边那个文件不存在、文件读不了。
+    /// 静默返回是本项目最忌的形态——症状正是“点了导入、状态栏说成功、画面一点没动”。
+    func importXMPSidecar() {
+        guard let image = document?.sourceURL else {
+            alert = "[no_xmp_source] 这张图不是从文件打开的，找不到「图旁边的 .xmp」"
+            return
+        }
+        let url = XMPImporter.sidecarURL(forImage: image)
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            alert = "[no_xmp_sidecar] 图旁边没有 \(url.lastPathComponent)"
+            return
+        }
+        importXMP(from: url)
+    }
+
+    /// 从任意位置导入一个 XMP。文件选择器给的 URL 只在授权期间可读，
+    /// 所以读了就得当场用完（与批量回片、拼图选源同一个写法）。
+    func importXMP(from url: URL) {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else {
+            alert = "[xmp_unreadable] \(url.lastPathComponent) 读不了或不是 UTF-8 文本"
+            return
+        }
+        applyXMP(text, sourceName: url.lastPathComponent)
+    }
+
+    /// 把一段 XMP 文本落到参数上。纯映射在 `XMPImporter`，这里只管落地与点名。
+    private func applyXMP(_ xmp: String, sourceName: String) {
         guard var doc = document else { return }
-        let (params, unknown) = XMPImporter.import_(xmp, into: doc.params)
+        let before = doc.params
+        let (params, unknown) = XMPImporter.import_(xmp, into: before)
+        guard params != before else {
+            // 认出来的键一个都没落到参数上（或值本来就与当前一样）时必须说出来，
+            // 否则这次点击就是一次静默失效。不入历史、不重渲染。
+            status = "[xmp_no_mapping] \(sourceName)：没有改动任何参数（未知键 \(unknown.count) 个）"
+            return
+        }
         doc.params = params
         document = doc
         scheduleRender()
         scheduleHistoryCommit()
-        status = unknown.isEmpty ? "XMP 已导入" : "XMP 已导入，\(unknown.count) 个未知键已跳过"
+        status = unknown.isEmpty
+            ? "XMP 已导入（\(sourceName)）"
+            : "XMP 已导入（\(sourceName)）· \(unknown.count) 个未知键已跳过"
     }
 
     // MARK: - 导出

@@ -120,6 +120,55 @@ final class NewEnginesTests: XCTestCase {
         XCTAssertTrue(unknown.contains("SomeUnknownKey"))
     }
 
+    /// 分区调色（split toning）的两端都必须接上。以前只接了阴影与平衡，
+    /// `.whHue/.whSat/.whLum` 三个 case 存在却没有任何 mapKey 返回它们，
+    /// 症状是“导入完画面差一口气”而状态栏只说已导入 —— 所以两边各给一格断言。
+    func testXMPImportSplitToningBothEnds() {
+        let xmp = """
+        <rdf:Description>
+            crs:SplitToningShadowHue="30"
+            crs:SplitToningHighlightHue="-150"
+            crs:SplitToningHighlightSaturation="12"
+            crs:SplitToningHighlightLuminance="-8"
+        </rdf:Description>
+        """
+        let params = EditParameters()
+        let (result, unknown) = XMPImporter.import_(xmp, into: params)
+        XCTAssertEqual(result.wshHue, 30, accuracy: 0.001)
+        XCTAssertEqual(result.whlHue, -150, accuracy: 0.001, "高光染色落 whlHue")
+        XCTAssertEqual(result.whlSat, 12, accuracy: 0.001)
+        XCTAssertEqual(result.whlLum, -8, accuracy: 0.001)
+        XCTAssertTrue(unknown.isEmpty, "这四个键都认得：\(unknown)")
+    }
+
+    /// 入口的 `[xmp_no_mapping]` 判定拿的是“参数动没动”，所以这一条必须钉住：
+    /// 一个认不出的键都映不上时，参数逐字段等于出厂，而不是“看起来成功了”。
+    func testXMPWithOnlyUnknownKeysLeavesParamsUnchanged() {
+        let xmp = """
+        <rdf:Description>
+            crs:CropAspect="4x6"
+            crs:LensProfileEnable="0"
+        </rdf:Description>
+        """
+        let params = EditParameters()
+        let (result, unknown) = XMPImporter.import_(xmp, into: params)
+        XCTAssertEqual(result, params, "没映到任何键时必须逐字段不变（入口靠这条点名）")
+        XCTAssertEqual(unknown.count, 2)
+    }
+
+    /// sidecar 命名规则（图名换 `.xmp`，Lightroom 约定）。入口只读这个路径，
+    /// 所以规则本身必须可断言，不能“拿掉最后一个点后的东西”这类口径飘掉。
+    func testXMPSidecarURLNaming() {
+        let raw = URL(fileURLWithPath: "/photos/IMG_1234.CR3")
+        let sidecar = XMPImporter.sidecarURL(forImage: raw)
+        XCTAssertEqual(sidecar.lastPathComponent, "IMG_1234.xmp")
+        XCTAssertEqual(sidecar.deletingLastPathComponent(), raw.deletingLastPathComponent(),
+                       "sidecar 必须在图旁边那个目录里")
+        // 多层后缀只剥最后一层：A.CR2.cr3 -> A.CR2.xmp（与 Lightroom 一致）。
+        XCTAssertEqual(XMPImporter.sidecarURL(forImage: URL(fileURLWithPath: "/p/A.CR2.cr3"))
+                         .lastPathComponent, "A.CR2.xmp")
+    }
+
     // MARK: - CollageEngine
 
     func testCollageTemplates() {

@@ -17,6 +17,7 @@ struct EditorView: View {
     @State private var showTether = false
     @State private var showPresetImport = false
     @State private var showPresetExport = false
+    @State private var showXMPImport = false
     @State private var presetPayload: ExportFile?
     @State private var presetFilename = "preset.json"
 
@@ -58,6 +59,13 @@ struct EditorView: View {
                 model.applyPreset(loaded.params, report: loaded.report, sourceName: url.lastPathComponent)
             } catch {
                 model.alert = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            }
+        }
+        .fileImporter(isPresented: $showXMPImport,
+                      allowedContentTypes: [UTType(filenameExtension: "xmp") ?? .xml],
+                      allowsMultipleSelection: false) { result in
+            if case .success(let urls) = result, let url = urls.first {
+                model.importXMP(from: url)
             }
         }
         .fileExporter(isPresented: $showPresetExport,
@@ -260,6 +268,12 @@ struct EditorView: View {
                     }
                 }
                 Button("保存到 App 目录") { model.savePresetToDefault() }
+                Divider()
+                // XMP 就是 Adobe 那边的“一组参数”，与载入预设同一条语义。
+                // 两条路径都只能当场点名：旁边没文件、读不了、认不出键，
+                // 都得在状态栏/弹窗看到令牌，不能只靠一句“已导入”。
+                Button("读图旁边的 .xmp") { model.importXMPSidecar() }
+                Button("从 .xmp 导入…") { showXMPImport = true }
                 Divider()
                 Button("复位调色") { model.resetParams() }
                     .disabled(!model.hasImage)

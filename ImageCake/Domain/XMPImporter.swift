@@ -7,8 +7,18 @@ import Foundation
 //
 // 不做完整 XML 解析（太重）：用正则抽 crs: 属性，按映射表赋值。
 // 未知键不报错，跳过——XMP 版本多、各家扩展多，点名到每一个不现实。
+//
+// 入口在工具栏「预设」菜单（读图旁边的 .xmp / 选一个 .xmp）：XMP 就是
+// Adobe 那边的“一组参数”，与载入预设同一条语义，所以不另开一个面板。
 
 enum XMPImporter {
+    /// sidecar 的名字规则：图名换 `.xmp`（Lightroom / Camera Raw 的旁挂约定）。
+    /// 纯函数、可断言：入口只负责“读这个路径”，命名规则定在这里。
+    /// 多层后缀（`IMG_1.CR2.cr3`）只剥掉最后一层，与 Lightroom 的行为一致。
+    static func sidecarURL(forImage url: URL) -> URL {
+        url.deletingPathExtension().appendingPathExtension("xmp")
+    }
+
     /// 从 XMP 字符串导入参数。返回更新后的 EditParameters + 未识别键列表。
     static func import_(_ xmp: String, into params: EditParameters) -> (EditParameters, unknownKeys: [String]) {
         var p = params
@@ -83,6 +93,11 @@ enum XMPImporter {
             if key == "SplitToningShadowHue" { return .wshHue }
             if key == "SplitToningShadowSaturation" { return .wshSat }
             if key == "SplitToningShadowLuminance" { return .wshLum }
+            // 高光那一半边以前没接：`.whHue/.whSat/.whLum` 三个 case 存在但
+            // 没有任何 mapKey 会返回它们，所以分区调色导入只拿到了阴影与平衡。
+            if key == "SplitToningHighlightHue" { return .whHue }
+            if key == "SplitToningHighlightSaturation" { return .whSat }
+            if key == "SplitToningHighlightLuminance" { return .whLum }
             if key == "SplitToningBalance" { return .wmtHue }
             return nil
         }
