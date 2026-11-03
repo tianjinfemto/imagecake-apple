@@ -16,3 +16,8 @@ ImageCake/Resources/Models/*.bin
 out/
 *.log
 .DS_Store
+
+# 编辑器本地设置（不该进仓；仓库已公开）
+.arts/
+.vscode/
+.idea/
