@@ -131,6 +131,25 @@ struct LinearImage: Sendable {
         return LinearImage(size: target, pixels: out)
     }
 
+    /// 线性 → 显示码（逐通道 sRGB 编码，alpha 不动）。
+    ///
+    /// 这是全仓唯一一处这个换算：以前 `ColorReferenceLibrary` 与 `SkyLibrary`
+    /// 各自抄了一份一模一样的循环，而第三处需要它的人（重复帧指纹要拿显示码算亮度，
+    /// 拿线性算会把暗部噪声放大）再抄第四份只是迟早的事。统计类算法全部走显示域
+    /// 是同一条口径：线性域的均值与“人眼看到的明暗”差一个 OETF。
+    func toDisplay() -> DisplayImage {
+        let count = size.pixelCount
+        guard count > 0, pixels.count >= count * 4 else {
+            return DisplayImage(size: size, pixels: pixels)
+        }
+        var out = pixels
+        for i in 0 ..< count {
+            let o = i * 4
+            for c in 0 ..< 3 { out[o + c] = ColorMath.encode(out[o + c]) }
+        }
+        return DisplayImage(size: size, pixels: out)
+    }
+
     func cropped(to rect: PixelRect) -> LinearImage {
         let r = size.clamped(to: rect)
         guard !r.isEmpty, r != PixelRect(x: 0, y: 0, width: size.width, height: size.height) else { return self }

@@ -309,15 +309,6 @@ enum ColorReferenceLibrary {
     /// 线性 → 显示码。统计必须在显示域算：线性域的均值和"人眼看到的明暗"
     /// 差一个 OETF，拿线性统计去追会得到"客片比样片暗半档"的错觉。
     static func display(from linear: LinearImage) -> DisplayImage {
-        let size = linear.size
-        guard size.pixelCount > 0, linear.pixels.count >= size.pixelCount * 4 else {
-            return DisplayImage(size: size, pixels: linear.pixels)
-        }
-        var pixels = linear.pixels
-        for i in 0 ..< size.pixelCount {
-            let o = i * 4
-            for c in 0 ..< 3 { pixels[o + c] = ColorMath.encode(pixels[o + c]) }
-        }
-        return DisplayImage(size: size, pixels: pixels)
+        linear.toDisplay()
     }
 }

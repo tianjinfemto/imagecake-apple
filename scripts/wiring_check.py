@@ -59,7 +59,6 @@ PARAM_STRUCT_RE = re.compile(r'(?:public )?struct (\w+Parameters)\s*:')
 # `public var isSkinNeutral: Bool {` (a computed property) swallows the next `=`.
 FIELD_RE = re.compile(r'^\s{4}public var (\w+)\s*:\s*([^\n={]+)\s*=\s*([^\n{]+)', re.M)
 CLAMP_RE = re.compile(r'(\w+)\s*=\s*\1\.clamped')          # also matches `a = ...; b = ...`
-APPLY_RE = re.compile(r'^\s{4}static func apply\(', re.M)
 TOP_TYPE_RE = re.compile(r'^(?:public |final |fileprivate )*?(?:struct|enum|class|actor) (\w+)', re.M)
 PREFIX_RE = re.compile(r'hasPrefix\("([a-z_]+:)"\)')
 # A token is any bracketed lowercase slug, with an optional payload after a colon.
@@ -77,7 +76,7 @@ INTERP_RE = re.compile(r'\\\((.*?)\)')
 # Static entry points of an engine/importer/task type. A capability with no call site
 # for one of these does not exist, no matter how many assertions cover its maths.
 ENTRY_RE = re.compile(r'^\s{4}static func (apply|build|run|compose|suggest|detect|'
-                      r'merge|review|import_|write)\(', re.M)
+                      r'merge|review|import_|write|fingerprint|group)\(', re.M)
 EDITOR_FUNC_RE = re.compile(r'^\s{4}func (\w+)', re.M)
 BACKTICK_TYPE_RE = re.compile(r'`([A-Z][A-Za-z0-9]+)`')
 # Phrases that assert a capability is unavailable. Checked against the code, because
@@ -296,21 +295,39 @@ def enclosing_type(src, offset):
 
 
 def check_engine_entries(findings):
-    """`static func apply(` in Imaging must be called from outside its own file."""
+    """A static entry point in Imaging must be called from outside its own file.
+
+    The unit of reporting is the **type**, not the method: `ShapeWarp.build()` is an
+    internal helper of a type the render path does call (`ShapeWarp.apply`), and
+    shouting about it would be exactly the false positive that gets a checker
+    switched off. It used to look only at `apply()`, which quietly skipped every
+    engine whose entry is named differently -- so it now walks the shared verb set,
+    but reports a type only when *none* of its entries has an outside caller.
+    """
     files = {p: read(p) for p in swift_files()}
-    for path, src in files.items():
+    for path, src in sorted(files.items()):
         if not path.startswith(IMAGING):
             continue
-        for m in APPLY_RE.finditer(src):
+        # Group by type: a file can hold more than one (a helper enum next to the engine),
+        # and reporting the last-seen name for an aggregate of all of them would blame
+        # the wrong owner.
+        per_type: dict = {}
+        for m in ENTRY_RE.finditer(src):
             ty = enclosing_type(src, m.start())
             if not ty:
                 continue
-            needle = '%s.apply(' % ty
-            callers = [p for p, s in files.items() if p != path and needle in s]
-            if not callers:
-                findings.append('%s: %s has apply() but no call site anywhere '
+            verb = m.group(1)
+            seen = per_type.setdefault(ty, {'verbs': [], 'callers': set()})
+            if verb not in seen['verbs']:
+                seen['verbs'].append(verb)
+            needle = '%s.%s(' % (ty, verb)
+            seen['callers'] |= {p for p, s in files.items() if p != path and needle in s}
+        for ty, seen in sorted(per_type.items()):
+            if seen['verbs'] and not seen['callers']:
+                findings.append('%s: %s has %s but no call site outside its own file '
                                 '(implementation + tests, no feature)'
-                                % (os.path.basename(path), ty))
+                                % (os.path.basename(path), ty,
+                                   ' / '.join('%s()' % v for v in seen['verbs'])))
 
 
 def check_tokens(findings):
@@ -645,7 +662,13 @@ def _fixture_tree(good):
         'ImageCake/Imaging/LiveEngine.swift': (
             'import Foundation\nenum LiveEngine {\n    static func apply(_ x: Int) {}\n}\n'),
         'ImageCake/Imaging/ModelOnlyEngine.swift': (
-            'import Foundation\nenum ModelOnlyEngine {\n    static func apply(_ x: Int) {}\n}\n'),
+            'import Foundation\n'
+            # 带一个只给同文件用的 helper：类型的入口在模型层有人叫，所以整类不该报
+            # “没调用点”（真实事故：ShapeWarp.build 是 apply 的内部 helper，
+            # 按方法报就是假阳性）。但“只有 EditorModel 能到”那条仍然要报。
+            'enum ModelOnlyEngine {\n'
+            '    static func build(_ x: Int) -> Int { x }\n'
+            '    static func apply(_ x: Int) { _ = build(x) }\n}\n'),
         'ImageCake/Imaging/OrphanEngine.swift': (
             'import Foundation\nenum OrphanEngine {\n    static func apply(_ x: Int) {}\n}\n'),
         'ImageCake/Imaging/ExternalEngine.swift': (

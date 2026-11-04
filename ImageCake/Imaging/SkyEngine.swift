@@ -255,16 +255,7 @@ enum SkyLibrary {
     /// 的显示域逐像素混合），所以它必须先过 sRGB OETF；拿线性值直接合成会得
     /// 到"天比主体暗得多"的假天。
     static func display(from linear: LinearImage) -> DisplayImage {
-        let size = linear.size
-        guard size.pixelCount > 0, linear.pixels.count >= size.pixelCount * 4 else {
-            return DisplayImage(size: size, pixels: linear.pixels)
-        }
-        var pixels = linear.pixels
-        for i in 0 ..< size.pixelCount {
-            let o = i * 4
-            for c in 0 ..< 3 { pixels[o + c] = ColorMath.encode(pixels[o + c]) }
-        }
-        return DisplayImage(size: size, pixels: pixels)
+        linear.toDisplay()
     }
 
     /// 等比填满 + 居中裁。与 `CollageEngine.fit(.aspectFill)` 同语义，但作用在

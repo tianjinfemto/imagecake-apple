@@ -78,6 +78,10 @@ struct LibraryPanel: View {
                     .pickerStyle(.segmented)
                     .labelsHidden()
                     Spacer()
+                    Button("扫重复帧") { Task { await model.scanDuplicates() } }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(model.busy != nil)
                     Button("下一张未修") { model.openNextUnedited() }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
@@ -95,8 +99,35 @@ struct LibraryPanel: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
             }
+
+            duplicatesSection
         }
         .padding(12)
+    }
+
+    /// 重复帧那一块。只说“哪几张是同一机位”，不说“哪张最好”—— 后者要美学权重，
+    /// 本仓不装会挑。组里按文件名序给一个代表，意思是“这组修一张就够”，
+    /// 不是“这张更好看”。高 ISO 噪点重或反差不同的连拍可能不会被并进来
+    /// （阈值取 8 的理由与代价写在 `FrameHash` 文件头）—— 漏并不误并。
+    @ViewBuilder
+    private var duplicatesSection: some View {
+        if model.duplicateNote.isEmpty {
+            EmptyView()
+        } else {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(model.duplicateNote)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(Tokens.textSecondary)
+                ForEach(Array(model.duplicateGroups.enumerated()), id: \.offset) { index, names in
+                    Text("第 \(index + 1) 组 · 代表 \(names.first ?? "—")（按文件名序，不是“最好的一张”） · "
+                         + names.joined(separator: "、"))
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(Tokens.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
     private func count(for filter: LibraryFilter) -> Int {

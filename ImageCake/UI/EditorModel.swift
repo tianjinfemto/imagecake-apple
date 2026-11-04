@@ -29,6 +29,7 @@ final class EditorModel: ObservableObject {
         case stacking
         case tethering
         case colorRef
+        case scanningLibrary
 
         var title: String {
             switch self {
@@ -47,6 +48,7 @@ final class EditorModel: ObservableObject {
             case .stacking: return "正在堆栈多帧"
             case .tethering: return "正在等相机回片"
             case .colorRef: return "正在读参考样片"
+            case .scanningLibrary: return "正在扫重复帧"
             }
         }
 
@@ -67,6 +69,7 @@ final class EditorModel: ObservableObject {
             case .stacking: return "需要同一机位的 2 张以上连拍；先做整数平移对齐，再按模式堆叠"
             case .tethering: return "相机 10 秒不回片会报错而不是一直转圈"
             case .colorRef: return "只取那一张的三轴均值与标准差，不合成也不对齐"
+            case .scanningLibrary: return "每张只解 256px（与缩略图同档），几百张是十秒级；判据是汉明距离 ≤ 8"
             }
         }
     }
@@ -153,6 +156,9 @@ final class EditorModel: ObservableObject {
     }
     /// 最近一次 sidecar 读写结果（面板原样显示，不写"保存成功"这种废话）。
     @Published private(set) var libraryNote = ""
+    /// 重复帧分组（每组一个文件名列表）与那一行事实。只由 `scanDuplicates()` 写。
+    @Published private(set) var duplicateGroups: [[String]] = []
+    @Published private(set) var duplicateNote = ""
 
     // MARK: - 联机拍摄
 
@@ -230,6 +236,47 @@ final class EditorModel: ObservableObject {
         libraryFolder = nil
         libraryItems = []
         libraryNote = ""
+        duplicateGroups = []
+        duplicateNote = ""
+    }
+
+    /// 把库里的图按“同一机位几乎没动”分组（重复帧）。
+    ///
+    /// 只解 256px：指纹要的就是一个 9×8 的粗网格亮度，全分辨率解几百张是分钟级而
+    /// 并不会多判准一点（阈值实测就是在 256×192 上量的，见 `FrameHash` 文件头）。
+    /// 判据全在 `FrameHash` 的纯函数里并有断言；这里只负责解码、编排与点名。
+    /// 平场判定复用 `FrameTriage` 的同一个 `flatLimit`，不在这里另定一个口径。
+    func scanDuplicates() async {
+        guard !libraryItems.isEmpty else {
+            // 不复用 `[no_scope]`：那个说的是“没有目录权限”，这里是“根本还没选目录”，
+            // 两个原因对应的下一步不一样。
+            libraryNote = "[no_library] 先选一个目录，才有素材可扫"
+            return
+        }
+        busy = .scanningLibrary
+        defer { busy = nil }
+        let items = libraryItems
+        let frames: [FrameHash.Frame] = await Task.detached(priority: .userInitiated) {
+            var out: [FrameHash.Frame] = []
+            for item in items {
+                guard let loaded = try? await ImageLoader.load(url: item.url, maxEdge: 256) else {
+                    out.append(FrameHash.Frame(name: item.fileName, fingerprint: nil))
+                    continue
+                }
+                let display = loaded.linear.toDisplay()
+                // 平场帧不参与分组：两张毫无关系的纯色图哈希完全相同。
+                let flat = FrameTriage.review(display).tokens.contains("[flat-content]")
+                out.append(FrameHash.Frame(name: item.fileName,
+                                           fingerprint: FrameHash.fingerprint(display),
+                                           flat: flat))
+            }
+            return out
+        }.value
+        let result = FrameHash.group(frames)
+        duplicateGroups = result.groups.map { group in group.map { frames[$0].name } }
+        // 只写 duplicateNote，不抢 libraryNote：libraryNote 那行的颜色按“有没有令牌”
+        // 判红，而这句是事实而不是故障（`[dup:none]` 也带方括号）。
+        duplicateNote = result.report
     }
 
     /// 把当前图的参数存进它旁边的 sidecar（续作的最小闭环）。
