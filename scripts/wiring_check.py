@@ -76,7 +76,7 @@ INTERP_RE = re.compile(r'\\\((.*?)\)')
 # Static entry points of an engine/importer/task type. A capability with no call site
 # for one of these does not exist, no matter how many assertions cover its maths.
 ENTRY_RE = re.compile(r'^\s{4}static func (apply|build|run|compose|suggest|detect|'
-                      r'merge|review|import_|write|fingerprint|group)\(', re.M)
+                      r'merge|review|import_|write|fingerprint|group|proposal)\(', re.M)
 EDITOR_FUNC_RE = re.compile(r'^\s{4}func (\w+)', re.M)
 BACKTICK_TYPE_RE = re.compile(r'`([A-Z][A-Za-z0-9]+)`')
 # Phrases that assert a capability is unavailable. Checked against the code, because

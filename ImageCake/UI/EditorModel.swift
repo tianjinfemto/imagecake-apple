@@ -571,6 +571,51 @@ final class EditorModel: ObservableObject {
         collapseFaceStrengthsIfAllFollow()
     }
 
+    // MARK: - 自动增强（量原图的确定性建议）
+
+    /// 「自动增强」：从**原图线性档**量出曝光与白平衡建议，写进现有滑杆。
+    ///
+    /// 是覆盖而不是叠加：建议值本来就是按原图算的绝对值，若按当前画面（已含用户自己
+    /// 的色温）去量，同一个按钮按第二次会往同方向再推一次 —— 那就是“越点越偏”。
+    /// 量原图因此幂等，也才敢让人连按。不新增参数，所以预设面一点没动。
+    func applyAutoAdjust() {
+        guard let doc = document else { return }
+        guard let p = AutoAdjust.proposal(linear: doc.linear) else {
+            alert = "[auto:no_samples] 量不到样本，没动任何参数"
+            return
+        }
+        let note = p.notes.isEmpty ? "" : " · " + p.notes.joined(separator: " ")
+        guard !p.isNoOp else {
+            status = "自动增强 没有要动的（这张已接近中性中间调）" + note
+            return
+        }
+        updateParams {
+            $0.exposure = p.exposure
+            $0.temperature = p.temperature
+            $0.tint = p.tint
+        }
+        status = String(format: "自动增强 EV %+.2f · 色温 %+.0f · 色调 %+.0f",
+                        p.exposure, p.temperature, p.tint) + note
+    }
+
+    /// 「按脸大小自动力度」：把逐脸力度写成按各脸占画面比例算出的值。
+    ///
+    /// 没有关键点就整段不跑并点名 —— 不拿“假设平均脸大小”糊过去（那个值会把所有脸
+    /// 拉成同一个缩放，不如不改）。比例到力度的换算是一条**政策**，写在
+    /// `AutoAdjust.faceScale` 的注释里。
+    func autoFaceScales() {
+        guard let doc = document else { return }
+        let faces = doc.faceGeometries
+        guard !faces.isEmpty else {
+            alert = "[no_landmarks] 先检测关键点，才有脸可按比例（不拿默认脸大小糊）"
+            return
+        }
+        let scales = faces.map { AutoAdjust.faceScale($0.bounds.width * $0.bounds.height) }
+        updateParams { $0.faceStrength.scales = scales }
+        let shown = scales.map { String(Int($0.rounded())) }.joined(separator: "/")
+        status = "逐脸力度按脸大小自动：\(shown)%（脸越大越接近或超过全局，小脸降力度）"
+    }
+
     func resetFaceScales() {
         updateParams { $0.faceStrength.scales = [] }
         status = "已让所有脸回到跟随全局"

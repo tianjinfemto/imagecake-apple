@@ -58,6 +58,11 @@ struct BeautyPanel: View {
                               systemImage: "hand.tap")
                     }
                     .buttonStyle(.bordered)
+                    Button("按脸大小自动") { model.autoFaceScales() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(model.document?.faceGeometries.isEmpty ?? true)
+                        .macHelp("脸占画面 4% 时力度的 100%（跟随全局），小脸按 sqrt(面积比) 降下来，夹在 50…150%。这是一条写死的政策，不是量出来的；没检测到关键点时整段不跑并点名 [no_landmarks]。")
                     Button("全部跟随全局") { model.resetFaceScales() }
                         .buttonStyle(.bordered)
                         .controlSize(.small)

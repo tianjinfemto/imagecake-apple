@@ -16,6 +16,17 @@ struct TonePanel: View {
         VStack(spacing: 12) {
             HistogramView().environmentObject(model)
 
+            SectionCard(title: "自动增强", subtitle: "量原图，不是 AI") {
+                Button("曝光与白平衡自动") { model.applyAutoAdjust() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(!model.hasImage)
+                Text("中位数对 18% 灰定曝光，色温/色调由自家增益模型闭式解（不是试探，也不是网络）。量的始终是从原图，所以连按三次结果一样；建议值覆盖现有滑杆而不是叠加。已知边界：白参考取“近无彩且不暗”的像素，整幅都是暖色木墙时会把它当白参照把人追冷；参考像素不够会点名 [auto:wb_noref] 而不动白平衡，提亮越界会点名 [auto:hl_cap]。美学判断不在本栏，那需要权重。")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Tokens.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             SectionCard(title: "基础", subtitle: "线性 → 显示") {
                 SliderRow(title: "曝光", range: -2 ... 2, step: 0.05,
                           format: { String(format: "%+.2f EV", $0) },
