@@ -124,7 +124,10 @@ enum FrameHash {
         guard low.isFinite, high.isFinite else { return nil }
         // 退化指纹：全 0（横向单调不降，例：从左到右变亮的渐变墙）或全 1
         // （单调不升）。实测它们与纯色图**同为 0**，拿去分组就是把不同的图判成重复。
-        let allOnes = (UInt64(1) << UInt64(bitCount)) - 1
+        // 全 1 的写法是 `UInt64.max >> (64 − bitCount)`而不是 `(1 << bitCount) − 1`：
+        // bitCount 正好等于 64，而 Swift 里移位量 ≥ 位宽是**运行时 trap**——它在 CI 上
+        // 表现为“无编译错、无失败用例”，因为测试宿主直接崩了（本地 lex/wiring 全绿抱不住）。
+        let allOnes = UInt64.max >> UInt64(64 - bitCount)
         guard bits != 0, bits != allOnes else { return nil }
         return Fingerprint(bits: bits, spread: high - low)
     }
