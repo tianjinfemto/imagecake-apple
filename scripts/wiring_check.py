@@ -89,7 +89,15 @@ NEGATIVE_DOC_RE = re.compile(u'(仍只有算子|没有入口|无入口|不提供
 CLAIM_WIRED_RE = re.compile(u'(已接线|接上|驱动)')
 CLAIM_SPARE_RE = re.compile(u'(未接线|备用|没有任务引用)')
 TEST_FUNC_RE = re.compile(r'^\s*func test', re.M)
-COUNT_ANCHOR_RE = re.compile(r'(?:单元测试（|格 XCTest|全部 )(\d+) 格')
+# Count anchors, one shape per place that is allowed to state a number. Markdown
+# emphasis (`**375** 格`) must not silently disable the check -- that happened: the
+# pattern matched nothing, the checker reported 0 findings, and the docs were 12 格
+# behind the tree. Hence: tolerant patterns, plus an "anchor must exist" guard below.
+COUNT_ANCHORS = (
+    re.compile(r'单元测试（\s*\**(\d+)\**\s*格'),
+    re.compile(r'(\d+)\s*格\s*XCTest'),
+    re.compile(r'全部\s*\**(\d+)\**\s*格断言'),
+)
 # Doc-side opt-out for past-tense negatives; see check_stale_doc_claims.
 HISTORY_MARK = 'wiring-check:history'
 RESOLVED_MARK = '✅'
@@ -550,20 +558,35 @@ def check_test_counts(findings):
     """Documented test-case counts must match the tree.
 
     Four different numbers for the same suite (320 / 342 / 344 / 352) were live in the
-    docs at once, none of them wrong at the time it was written and all of them wrong
-    now. A count is only worth printing if something re-checks it, so only the shapes
-    matched by COUNT_ANCHOR_RE are treated as claims; dated historical rows stay.
+    docs at once, none of them wrong when written and all of them wrong later. A count
+    is only worth printing if something re-checks it, so only COUNT_ANCHORS shapes are
+    treated as claims; dated historical rows stay.
+
+    The check must also prove it is *awake*: if it finds no anchor at all, that is a
+    finding. A silently-inert counter reads exactly like a passing one.
     """
     actual = tree_test_count()
     docs = ['README.md'] if os.path.exists('README.md') else []
     if os.path.isdir('docs'):
         docs += sorted(os.path.join('docs', n) for n in os.listdir('docs') if n.endswith('.md'))
+    matched = 0
     for path in docs:
-        for m in COUNT_ANCHOR_RE.finditer(read(path)):
-            if int(m.group(1)) != actual:
-                findings.append('%s: documented count %s 格 but the tree has %d '
-                                '`func test` methods (fix the number, or say which sha '
-                                'it was true for)' % (path, m.group(1), actual))
+        text = read(path)
+        for pattern in COUNT_ANCHORS:
+            for m in pattern.finditer(text):
+                matched += 1
+                if int(m.group(1)) != actual:
+                    findings.append('%s: count anchor "%s" says %s 格 but the tree has %d '
+                                    '`func test` methods (fix the number, or say which '
+                                    'sha it was true for)'
+                                    % (path, m.group(0), m.group(1), actual))
+    if matched == 0:
+        findings.append('no test-count anchor matched in the docs -- the counter is inert '
+                        '(patterns: %s)' % ' / '.join(p.pattern for p in COUNT_ANCHORS))
+    elif matched < 2:
+        findings.append('only %d test-count anchor found; README and parity.md are both '
+                        'supposed to carry one (a dropped anchor means the two files can '
+                        'drift apart again)' % matched)
 
 
 WRONG_COUNT = '3'
@@ -636,11 +659,14 @@ def _fixture_tree(good):
             '    func testTwo() { XCTAssertTrue(true) }\n}\n'),
         'README.md': (
             '# fake\n\n'
-            '| 单元测试（%s 格） | 假表 |\n\n'
+            '| 单元测试（**%s** 格） | 假表 |\n\n'
+            '本仓 %s 格 XCTest（假对照行）\n\n'
             '- [x] 已完成的复选框，不能被当成令牌\n'
             '- 方向 a-d 四条都是方向断言\n'
             '`LiveEngine` 有算子**没有入口** → ✅ 入口已接通\n'
-            '%s') % (RIGHT_COUNT if good else WRONG_COUNT, stale_doc),
+            '%s') % (RIGHT_COUNT if good else WRONG_COUNT,
+                     RIGHT_COUNT if good else WRONG_COUNT,
+                     stale_doc),
     }
     entries = [
         {'id': 'fake_wired', 'purpose': '478 点关键点（%s）' % WIRED_PURPOSE},
@@ -661,7 +687,8 @@ EXPECTED_BAD = (
     'no panel calls applyExternal',
     'fake_stale_says_not_wired: purpose says spare/not wired',
     'fake_claim_wired_nothing: purpose claims the weight is wired',
-    'documented count 3 格',
+    'count anchor "单元测试（**3** 格',
+    'count anchor "3 格 XCTest',
     'says LiveEngine has no entry point',
     '[fake_never_emitted] is documented but no code emits',
 )

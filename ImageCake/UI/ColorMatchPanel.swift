@@ -8,9 +8,9 @@ import UniformTypeIdentifiers
 // 与滤镜同属批量同步的 `.style` 组（见 ParamSync）。
 //
 // 面板上必须直说的两件事：
-//   · 对齐的是**均值与标准差**，不是直方图形状。样片是高反差硬光、客片是
-//     平光时，追完只是均值反差像了，影调分布仍然不像（真解是直方图规定化，
-//     断层风险高，本版不做）。
+//   · 第一档对齐的是**均值与标准差**；影调形状（双峰样片对单峰客片）靠下面
+//     那个“影调形状也追”开关（分位数传递，`ShapeTransfer`），它默认关：
+//     等价于拉一条重 S 曲线，样片反差极大时会在渐变里留硬边。
 //   · 皮肤保护走**色域**判定，不是分割网络。所以暖色墙会被当成皮肤少追一点
 //     色度——保守方向的错，比把人追绿安全。
 
@@ -53,6 +53,14 @@ struct ColorMatchPanel: View {
             .toggleStyle(.switch)
             .controlSize(.small)
 
+            // 第二档。放在“连亮度一起追”下面是因为它只动亮度轴：上面那个关了，
+            // 这里开了也不会生效（报告里点名 [shape:luma_off]，不静默）。
+            Toggle(isOn: bool(\.colorMatch.shapeMatch)) {
+                Text("影调形状也追（第二档）").font(.system(size: 11))
+            }
+            .toggleStyle(.switch)
+            .controlSize(.small)
+
             Toggle(isOn: bool(\.colorMatch.protectSkin)) {
                 Text("保护皮肤色度").font(.system(size: 11))
             }
@@ -66,7 +74,7 @@ struct ColorMatchPanel: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Text("把这一张的亮度/红绿/蓝黄三个轴的均值与反差搬到样片上。只对齐一阶与二阶统计量：样片是高反差硬光而本张是平光时，追完像调性而不像影调。皮肤保护按色域判，暖色墙会被当成皮肤少追一点色度。")
+            Text("把这一张的亮度/红绿/蓝黄三个轴的均值与反差搬到样片上。只对齐一阶与二阶统计量时，样片是高反差硬光而本张是平光会出现“像调性而不像影调”。\n\n开了“影调形状也追”后，亮度轴改走分位数传递（整条影调曲线搬到样片的形状上），实测单峰→双峰的 64 分箱距离从 2.00 降到 0.06（不开时仍是 2.00）。代价是它等价于拉一条重 S 曲线，样片反差极大时渐变里会出现硬边，所以默认关；纯色/黑场这类几乎没分布的图会自动跳过并点名。皮肤保护只减色度位移，不动亮度。")
                 .font(.system(size: 10))
                 .foregroundStyle(Tokens.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)

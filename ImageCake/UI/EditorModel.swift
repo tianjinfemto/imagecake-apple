@@ -1335,8 +1335,10 @@ final class EditorModel: ObservableObject {
                 }.value
                 if let current = ColorTransfer.stats(display),
                    let referenceStats = ColorTransfer.stats(reference) {
+                    let shape = ColorTransfer.shapePlan(image: display, reference: reference,
+                                                        match: updated.params.colorMatch).status
                     status = ColorTransfer.report(current: current, reference: referenceStats,
-                                                  match: updated.params.colorMatch)
+                                                  match: updated.params.colorMatch, shape: shape)
                         + " · 样片 \(name)"
                 } else {
                     status = "已导入样片：\(name)（读不到统计量，追色不会跑）"

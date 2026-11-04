@@ -26,9 +26,10 @@ import Foundation
 //      （往返对立色本身有 1e-16 级误差，不跳就宣称不了恒等）。
 //
 // 已知边界（写清楚，别当成 AI）：
-//   · 只对齐一阶/二阶统计量。**不匹配直方图形状**：样片是双峰（高反差硬光）
-//     而客片是单峰时，追完只是均值反差对了，影调分布仍然不像。真解是直方图
-//     规定化，代价是要存排序后的样本，且断层风险高，这一版不做。
+//   · 第一档只对齐一阶/二阶统计量。**影调形状**（双峰样片对单峰客片那种“调性像
+//     而影调不像”）靠第二档 `ShapeTransfer`：亮度轴上做分位数传递，默认关。
+//     两档的分工有实测数字：单峰→双峰夹具上 64 分箱 L1 距离 2.0000，跑完第一档
+//     仍是 2.0000（增益被 1.8 夹住跳不外去），跑第二档是 0.0600。
 //   · 空间无关：样片里的构图、人脸位置完全不参与。
 //   · 保护皮肤用**色域**判定（与 `SkinMask.isSkin` 同一个口径），不用分割网络。
 //     症状可预期：暖色墙会被误判成皮肤而少追色度（保守方向，比把人追绿安全）；
@@ -133,10 +134,52 @@ enum ColorTransfer {
                  gain: gain(reference: reference.bStd, current: current.bStd)))
     }
 
+    /// 第二档这次到底跑没跑。必须进报告：“开了但被跳过”与“开了且生效”
+    /// 在画面上可能一模一样，只看图分辨不出来。
+    enum ShapeStatus: Equatable, Sendable {
+        /// 参数里没开。
+        case off
+        /// 曲线已构造并作用于亮度轴。
+        case applied
+        /// 亮度轴本来就关着（形状档只动亮度）。
+        case lumaOff
+        case skipped(ShapeTransfer.Skip)
+
+        var text: String {
+            switch self {
+            case .off: return ""
+            case .applied: return " · 影调形状已对齐（\(ShapeTransfer.knots) knot）"
+            case .lumaOff:
+                return " [shape:luma_off] 亮度轴没追（关了“连亮度一起追”），形状档不生效"
+            case .skipped(let skip): return " · " + ShapeTransfer.note(skip)
+            }
+        }
+    }
+
+    /// 构造第二档的曲线并给出状态。抽样只在这里发生，应用与报告共用同一个判定。
+    static func shapePlan(image: DisplayImage, reference: DisplayImage,
+                          match: ColorMatchParameters) -> (curve: ShapeTransfer.Curve?, status: ShapeStatus) {
+        guard match.shapeMatch else { return (nil, .off) }
+        guard match.matchLuma else { return (nil, .lumaOff) }
+        switch ShapeTransfer.curve(source: ShapeTransfer.lumaSamples(image),
+                                   reference: ShapeTransfer.lumaSamples(reference)) {
+        case .success(let curve):
+            // 恒等曲线（样片与本图同分布）不传下去：下面的 apply 已经会逐比特跳过，
+            // 但把状态报成 applied 就是假消息 —— 这里让它回到 off 的语义。
+            return curve.identity ? (nil, .off) : (curve, .applied)
+        case .failure(let skip):
+            return (nil, .skipped(skip))
+        }
+    }
+
     /// 按已算好的计划改一张图。拆成两个入口是因为面板要能"预览这一步会动多少"
     /// 而不再读一次参考图。
+    ///
+    /// `shape` 非空时**亮度轴改走形状曲线**（不是两条叠起来：均值/反差已经包含在
+    /// 分位数传递里，叠两次会把图推得过反差）。A/B 两轴照旧走第一档。
     static func apply(_ image: DisplayImage, plan maps: (l: AxisMap, a: AxisMap, b: AxisMap),
-                      match: ColorMatchParameters) -> DisplayImage {
+                      match: ColorMatchParameters,
+                      shape: ShapeTransfer.Curve? = nil) -> DisplayImage {
         let size = image.size
         let count = size.pixelCount
         let strength = BeautyParameters.unit(match.strength)
@@ -152,7 +195,18 @@ enum ColorTransfer {
             let source = BeautyEngine.opponent(r: r, g: g, b: b)
             // 皮肤保护只减色度位移：亮度追不追是曝光一致性问题，与人是不是皮肤无关。
             let chromaKeep = protect && SkinMask.isSkin(r: r, g: g, b: b) ? Self.skinChromaKeep : 1.0
-            let l = matchLuma ? maps.l.apply(source.l, strength: strength) : source.l
+            // 亮度轴：形状档开时走曲线（它已经包含均值与反差，不再叠第一档），
+            // 否则走原来的一阶/二阶映射。写成三段而不是 `? ? :` 嵌 Optional：
+            // 本仓被 Double?/?? 推断歧义红过一轮，拆开长一点但不会错。
+            let l: Double
+            if !matchLuma {
+                l = source.l
+            } else if let curve = shape {
+                let moved = curve.apply(source.l)
+                l = source.l + (moved - source.l) * strength
+            } else {
+                l = maps.l.apply(source.l, strength: strength)
+            }
             let a = maps.a.apply(source.a, strength: strength * chromaKeep)
             let bb = maps.b.apply(source.b, strength: strength * chromaKeep)
             let rgb = BeautyEngine.fromOpponent(l: l, a: a, b: bb)
@@ -171,12 +225,16 @@ enum ColorTransfer {
         guard match.enabled, BeautyParameters.unit(match.strength) > 0,
               let reference, let refStats = Self.stats(reference),
               let curStats = Self.stats(image) else { return image }
-        return apply(image, plan: plan(current: curStats, reference: refStats), match: match)
+        return apply(image,
+                     plan: plan(current: curStats, reference: refStats),
+                     match: match,
+                     shape: shapePlan(image: image, reference: reference, match: match).curve)
     }
 
     /// 给人看的一句话：动了多少、哪几轴被夹过。写进状态栏与导出报告，
     /// 免得"追色"变成一个只能靠肉眼验收的黑箱。
-    static func report(current: ColorStats, reference: ColorStats, match: ColorMatchParameters) -> String {
+    static func report(current: ColorStats, reference: ColorStats, match: ColorMatchParameters,
+                       shape: ShapeStatus = .off) -> String {
         let maps = plan(current: current, reference: reference)
         // 哪一轴被夹过必须说出来：不说就只能看到“追了但没追到”，然后怀疑算子。
         var clipped: [String] = []
@@ -184,12 +242,13 @@ enum ColorTransfer {
         if maps.a.gain >= gainRange.upperBound - 1e-9 { clipped.append("A") }
         if maps.b.gain >= gainRange.upperBound - 1e-9 { clipped.append("B") }
         let clipNote = clipped.isEmpty ? "" : " · \(clipped.joined(separator: "/"))轴反差已夹顶（样片反差大得多）"
-        return String(format: "追色 ΔL %+.3f ΔA %+.3f ΔB %+.3f · 反差增益 %.2f/%.2f/%.2f · 强度 %d%%%@",
+        return String(format: "追色 ΔL %+.3f ΔA %+.3f ΔB %+.3f · 反差增益 %.2f/%.2f/%.2f · 强度 %d%%",
                       reference.lMean - current.lMean,
                       reference.aMean - current.aMean,
                       reference.bMean - current.bMean,
                       maps.l.gain, maps.a.gain, maps.b.gain,
-                      Int(match.strength.rounded()), clipNote)
+                      Int(match.strength.rounded()))
+            + clipNote + shape.text
     }
 }
 

@@ -340,6 +340,13 @@ public struct ColorMatchParameters: Equatable, Sendable {
     /// 皮肤保护：皮肤像素只吃一部分色度位移。默认开，因为默认使用场景是
     /// 人像批量——把人脸追绿是最显眼的失败。
     public var protectSkin: Bool = true
+    /// 第二档：亮度轴的**整个分布形状**也搬到样片上（分位数传递）。
+    /// 默认关：它等价于拉一条重 S 曲线，样片反差极大时会在渐变里留下硬边
+    /// （实测最陡段斜率 ~189）。实现与边界见 `ShapeTransfer`。
+    ///
+    /// 它不开新的“力度旋钮”：强度共用 `strength`，且只动亮度轴（`matchLuma` 关时
+    /// 自动不生效并在报告里点名 `[shape:luma_off]`），所以 `isNeutral` 不需要为它加条件。
+    public var shapeMatch: Bool = false
 
     public init() {}
 
@@ -360,6 +367,7 @@ extension ColorMatchParameters: Codable {
         case strength
         case matchLuma = "match_luma"
         case protectSkin = "protect_skin"
+        case shapeMatch = "shape_match"
     }
 
     public init(from decoder: Decoder) throws {
@@ -370,6 +378,7 @@ extension ColorMatchParameters: Codable {
         strength = try c.decodeIfPresent(Double.self, forKey: .strength) ?? strength
         matchLuma = try c.decodeIfPresent(Bool.self, forKey: .matchLuma) ?? matchLuma
         protectSkin = try c.decodeIfPresent(Bool.self, forKey: .protectSkin) ?? protectSkin
+        shapeMatch = try c.decodeIfPresent(Bool.self, forKey: .shapeMatch) ?? shapeMatch
         clamp()
     }
 
@@ -380,6 +389,7 @@ extension ColorMatchParameters: Codable {
         try c.encode(strength, forKey: .strength)
         try c.encode(matchLuma, forKey: .matchLuma)
         try c.encode(protectSkin, forKey: .protectSkin)
+        try c.encode(shapeMatch, forKey: .shapeMatch)
     }
 }
 
