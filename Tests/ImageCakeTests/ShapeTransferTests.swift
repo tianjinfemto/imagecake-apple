@@ -58,7 +58,10 @@ final class ShapeTransferTests: XCTestCase {
     }
 
     private func distance(_ a: [Double], _ b: [Double]) -> Double {
-        zip(a, b).reduce(0.0) { $0 + abs($1 - $2) }
+        // 写成显式参数名而不是 `$0 + abs($1 - $2)`：`zip` 的元素是一个元组，
+        // 两参数闭包里 `$1` 就是整个元组，“`$1 - $2`”单拿不到两个分量
+        //（CI 报 cannot convert '(Double, Double)' to 'Double'）。
+        zip(a, b).reduce(0.0) { total, pair in total + abs(pair.0 - pair.1) }
     }
 
     private func curve(of subject: DisplayImage, against reference: DisplayImage) -> ShapeTransfer.Curve {
@@ -100,8 +103,8 @@ final class ShapeTransferTests: XCTestCase {
         XCTAssertGreaterThan(after, 0.0, "压到 0 反而说明夹具被复制成了样片，那是另一类错")
     }
 
-    /// 形状匹配蕴含统计匹配：均值与标准差也一起靠近样片。
-    func testShapeTierAlsoMovesMeanAndSpreadTowardReference() {
+    /// 形状匹配蕴含统计匹配：反差（std）一定跟着靠近样片。
+    func testShapeTierAlsoMovesSpreadTowardReference() {
         let subject = singlePeak(), reference = twoPeak()
         let shaped = ColorTransfer.apply(subject, reference: reference, match: match(shape: true))
         guard let cur = ColorTransfer.stats(subject),
@@ -109,10 +112,13 @@ final class ShapeTransferTests: XCTestCase {
               let out = ColorTransfer.stats(shaped) else {
             return XCTFail("夹具统计不出来")
         }
-        XCTAssertLessThan(abs(out.lMean - ref.lMean), abs(cur.lMean - ref.lMean),
-                          "亮度均值必须往样片靠（镜像：0.5155 对样片 0.5042）")
         XCTAssertLessThan(abs(out.lStd - ref.lStd), abs(cur.lStd - ref.lStd),
-                          "亮度反差必须往样片靠（镜像：0.3763 对样片 0.3808）")
+                          "亮度反差必须往样片靠（镜像：本张 0.0309 → 追完 0.3763，样片 0.3808）")
+        // 均值只断言“落在样片附近”，**不断言“比原来更近”**：夹具的本张均值 0.5135
+        // 本来就与样片 0.5042 只差 0.0093，而形状匹配后是 0.0113 —— 写成“更近”会红，
+        // 而那个红不是 bug，是把巧合当成了性质（镜像的三个数就写在这里）。
+        XCTAssertLessThan(abs(out.lMean - ref.lMean), 0.02,
+                          "追完的亮度均值应在样片附近（镜像 0.5155 对 0.5042）")
     }
 
     // MARK: - 曲线的三条性质
